@@ -1,0 +1,10 @@
+# Jaeger all-in-one for local trace visualization.
+# Start: make jaeger    Stop: make jaeger-stop
+# UI: http://localhost:16686
+# aitrace sends OTLP/gRPC to localhost:4317 by default.
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "4317:4317"   # OTLP/gRPC
+      - "16686:16686" # Jaeger UI

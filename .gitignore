@@ -1,0 +1,8 @@
+/aitrace
+*.exe
+coverage.out
+design.md
+business.md
+open.md
+goal.md
+AGENTS.md

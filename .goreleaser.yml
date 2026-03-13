@@ -1,0 +1,30 @@
+version: 2
+
+builds:
+  - main: ./cmd/aitrace
+    binary: aitrace
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "aitrace-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: rnaudi
+    name: aitrace
+
+changelog:
+  use: github-native
