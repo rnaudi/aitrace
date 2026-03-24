@@ -14,6 +14,15 @@ Or:
 curl -sSL https://raw.githubusercontent.com/rnaudi/aitrace/main/install.sh | sh
 ```
 
+Run any AI tool or agent and inspect:
+
+- LLM calls
+- tokens used
+- latency
+- tools invoked
+- overall behavior of the run
+
+
 ```sh
 aitrace run -- opencode "refactor the auth module"
 [aitrace] #1 gpt-4o | tok: 537 in / 19 out | 857ms
@@ -34,6 +43,14 @@ aitrace run --json -- opencode 2>calls.jsonl     # JSONL export
 aitrace run --otel -- opencode                   # OpenTelemetry spans via OTLP/gRPC
 aitrace doctor                                   # check TLS connectivity
 ```
+
+## Why run this
+
+- understand what your AI tools are actually doing
+- debug slow or complex agent behavior
+- inspect token usage across runs
+- observe tool usage and call patterns
+- compare different agents or prompts
 
 ## Comparison
 
