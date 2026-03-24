@@ -28,3 +28,15 @@ release:
 
 changelog:
   use: github-native
+
+brews:
+  - repository:
+      owner: rnaudi
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/rnaudi/aitrace"
+    description: "Zero-config agent tracer"
+    license: "MIT"
+    test: |
+      system "#{bin}/aitrace", "--version"
