@@ -25,24 +25,28 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
-// DefaultLLMHosts is the default LLM API host allowlist.
-var DefaultLLMHosts = []string{
-	"api.openai.com",
-	"api.anthropic.com",
-	"api.githubcopilot.com",
-	"copilot-proxy.githubusercontent.com",
+// DefaultLLMHosts returns the default LLM API host allowlist.
+func DefaultLLMHosts() []string {
+	return []string{
+		"api.openai.com",
+		"api.anthropic.com",
+		"api.githubcopilot.com",
+		"copilot-proxy.githubusercontent.com",
+	}
 }
 
-// DefaultLLMWildcards is suffix patterns matched against the host (e.g. ".githubcopilot.com").
-var DefaultLLMWildcards = []string{
-	".githubcopilot.com",
+// DefaultLLMWildcards returns suffix patterns matched against the host (e.g. ".githubcopilot.com").
+func DefaultLLMWildcards() []string {
+	return []string{
+		".githubcopilot.com",
+	}
 }
 
 // ProxyOptions configures the MITM proxy.
 type ProxyOptions struct {
-	// Hosts to intercept (exact match). If nil, DefaultLLMHosts is used.
+	// Hosts to intercept (exact match). If nil, DefaultLLMHosts() is used.
 	Hosts []string
-	// Wildcard suffixes to intercept. If nil, DefaultLLMWildcards is used.
+	// Wildcard suffixes to intercept. If nil, DefaultLLMWildcards() is used.
 	Wildcards []string
 	// OnCall is invoked for each intercepted call. May be nil.
 	OnCall func(CapturedCall)
@@ -89,10 +93,10 @@ type Proxy struct {
 // NewProxy creates a new MITM proxy. It does not start listening.
 func NewProxy(opts ProxyOptions) (*Proxy, error) {
 	if opts.Hosts == nil {
-		opts.Hosts = append([]string(nil), DefaultLLMHosts...)
+		opts.Hosts = DefaultLLMHosts()
 	}
 	if opts.Wildcards == nil {
-		opts.Wildcards = append([]string(nil), DefaultLLMWildcards...)
+		opts.Wildcards = DefaultLLMWildcards()
 	}
 
 	// Pre-bind to discover a free port, then release it.

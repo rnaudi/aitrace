@@ -734,12 +734,15 @@ func TestParseNonStreamingResponseAnthropicDispatch(t *testing.T) {
 	}
 	parseNonStreamingResponse(&call, []byte(anthropicResp))
 
-	assert.Equal(t, "msg_dispatch1", call.ResponseID)
-	assert.Equal(t, "claude-3-5-sonnet-20241022", call.Model)
-	assert.Equal(t, int64(50), call.InputTokens)
-	assert.Equal(t, int64(20), call.OutputTokens)
-	assert.Equal(t, "end_turn", call.FinishReason)
-	assert.Equal(t, "", call.ErrorMessage)
+	assert.Equal(t, CapturedCall{
+		Provider:     ProviderAnthropic,
+		StatusCode:   200,
+		ResponseID:   "msg_dispatch1",
+		Model:        "claude-3-5-sonnet-20241022",
+		InputTokens:  50,
+		OutputTokens: 20,
+		FinishReason: "end_turn",
+	}, call)
 }
 
 func TestParseNonStreamingResponseAnthropicToolUseDispatch(t *testing.T) {
@@ -763,13 +766,17 @@ func TestParseNonStreamingResponseAnthropicToolUseDispatch(t *testing.T) {
 	}
 	parseNonStreamingResponse(&call, []byte(anthropicResp))
 
-	assert.Equal(t, "msg_dispatch_tools", call.ResponseID)
-	assert.Equal(t, "claude-3-5-sonnet-20241022", call.Model)
-	assert.Equal(t, int64(100), call.InputTokens)
-	assert.Equal(t, int64(60), call.OutputTokens)
-	assert.Equal(t, "tool_use", call.FinishReason)
-	assert.Equal(t, []string{"search"}, call.ToolCalls)
-	assert.Equal(t, []string{`{"query": "weather"}`}, call.ToolCallArgs)
+	assert.Equal(t, CapturedCall{
+		Provider:     ProviderAnthropic,
+		StatusCode:   200,
+		ResponseID:   "msg_dispatch_tools",
+		Model:        "claude-3-5-sonnet-20241022",
+		InputTokens:  100,
+		OutputTokens: 60,
+		FinishReason: "tool_use",
+		ToolCalls:    []string{"search"},
+		ToolCallArgs: []string{`{"query": "weather"}`},
+	}, call)
 }
 
 func TestParseNonStreamingResponseAnthropicErrorDispatch(t *testing.T) {
@@ -783,9 +790,11 @@ func TestParseNonStreamingResponseAnthropicErrorDispatch(t *testing.T) {
 	}
 	parseNonStreamingResponse(&call, []byte(errorResp))
 
-	assert.Equal(t, "overloaded_error", call.ErrorMessage)
-	assert.Equal(t, "", call.Model)
-	assert.Equal(t, "", call.ResponseID)
+	assert.Equal(t, CapturedCall{
+		Provider:     ProviderAnthropic,
+		StatusCode:   529,
+		ErrorMessage: "overloaded_error",
+	}, call)
 }
 
 func TestParseSSEChunkAnthropicDispatch(t *testing.T) {
@@ -796,9 +805,11 @@ func TestParseSSEChunkAnthropicDispatch(t *testing.T) {
 		Data:  `{"type": "message_start", "message": {"id": "msg_sse_dispatch", "model": "claude-3-5-sonnet-20241022", "usage": {"input_tokens": 30}}}`,
 	})
 
-	assert.Equal(t, "msg_sse_dispatch", chunk.ID)
-	assert.Equal(t, "claude-3-5-sonnet-20241022", chunk.Model)
-	assert.Equal(t, int64(30), chunk.InputTokens)
+	assert.Equal(t, ParsedResponse{
+		ID:          "msg_sse_dispatch",
+		Model:       "claude-3-5-sonnet-20241022",
+		InputTokens: 30,
+	}, chunk)
 }
 
 func TestParseSSEChunkAnthropicMessageDeltaDispatch(t *testing.T) {
@@ -809,8 +820,10 @@ func TestParseSSEChunkAnthropicMessageDeltaDispatch(t *testing.T) {
 		Data:  `{"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 15}}`,
 	})
 
-	assert.Equal(t, "end_turn", chunk.FinishReason)
-	assert.Equal(t, int64(15), chunk.OutputTokens)
+	assert.Equal(t, ParsedResponse{
+		FinishReason: "end_turn",
+		OutputTokens: 15,
+	}, chunk)
 }
 
 func TestParseSSEChunkAnthropicToolUseDispatch(t *testing.T) {
@@ -821,15 +834,32 @@ func TestParseSSEChunkAnthropicToolUseDispatch(t *testing.T) {
 		Event: "content_block_start",
 		Data:  `{"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_01", "name": "get_weather", "input": {}}}`,
 	})
-	assert.Equal(t, []string{"get_weather"}, startChunk.ToolCalls)
+	assert.Equal(t, ParsedResponse{
+		ToolCalls:    []string{"get_weather"},
+		ToolCallArgs: []string{""},
+		rawToolCalls: []openaiToolCall{{
+			Index: 1,
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "get_weather"},
+		}},
+	}, startChunk)
 
 	// content_block_delta with input_json_delta
 	deltaChunk := parseSSEChunk(ProviderAnthropic, &proxy.SSEEvent{
 		Event: "content_block_delta",
 		Data:  `{"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"city\":"}}`,
 	})
-	assert.Len(t, deltaChunk.rawToolCalls, 1)
-	assert.Equal(t, 1, deltaChunk.rawToolCalls[0].Index)
+	assert.Equal(t, ParsedResponse{
+		rawToolCalls: []openaiToolCall{{
+			Index: 1,
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Arguments: `{"city":`},
+		}},
+	}, deltaChunk)
 }
 
 // TestProxyAnthropicSSEFullStream tests the full SSE merge path for Anthropic

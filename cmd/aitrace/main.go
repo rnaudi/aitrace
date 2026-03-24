@@ -665,7 +665,7 @@ func doctorCmd() {
 		},
 	}
 
-	hosts := capture.DefaultLLMHosts
+	hosts := capture.DefaultLLMHosts()
 	results := make([]probeResult, len(hosts))
 	for i, host := range hosts {
 		results[i] = probeHost(client, host)

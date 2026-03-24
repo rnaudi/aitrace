@@ -173,8 +173,13 @@ func TestParseOpenAIResponseWithoutPromptDetails(t *testing.T) {
 	}`)
 
 	pr := ParseOpenAIResponse(body)
-	assert.Equal(t, int64(0), pr.CacheReadTokens)
-	assert.Equal(t, int64(0), pr.CacheWriteTokens)
+	assert.Equal(t, ParsedResponse{
+		ID:           "chatcmpl-nodetails",
+		Model:        "gpt-4o",
+		InputTokens:  100,
+		OutputTokens: 50,
+		FinishReason: "stop",
+	}, pr)
 }
 
 func TestParseUnknownFormat(t *testing.T) {
@@ -419,8 +424,11 @@ func TestParseOpenAIResponseNoToolCalls(t *testing.T) {
 	}`)
 
 	pr := ParseOpenAIResponse(body)
-	assert.Nil(t, pr.ToolCalls)
-	assert.Equal(t, "stop", pr.FinishReason)
+	assert.Equal(t, ParsedResponse{
+		ID:           "chatcmpl-tc2",
+		Model:        "gpt-4o",
+		FinishReason: "stop",
+	}, pr)
 }
 
 func TestParseOpenAISSEChunkWithToolCall(t *testing.T) {
@@ -428,10 +436,19 @@ func TestParseOpenAISSEChunkWithToolCall(t *testing.T) {
 	data := `{"id":"chatcmpl-sse-tc","model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"edit_file"}}]},"finish_reason":null}]}`
 
 	pr := ParseOpenAISSEChunk(data)
-	assert.Equal(t, "chatcmpl-sse-tc", pr.ID)
-	assert.Equal(t, "gpt-4o", pr.Model)
-	assert.Equal(t, []string{"edit_file"}, pr.ToolCalls)
-	assert.Equal(t, []string{""}, pr.ToolCallArgs)
+	assert.Equal(t, ParsedResponse{
+		ID:           "chatcmpl-sse-tc",
+		Model:        "gpt-4o",
+		ToolCalls:    []string{"edit_file"},
+		ToolCallArgs: []string{""},
+		rawToolCalls: []openaiToolCall{{
+			Index: 0,
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "edit_file"},
+		}},
+	}, pr)
 }
 
 func TestMergeSSEChunksWithToolCalls(t *testing.T) {
@@ -713,8 +730,17 @@ func TestParseAnthropicSSEChunkContentBlockStartToolUse(t *testing.T) {
 	t.Parallel()
 	data := `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather","input":{}}}`
 	pr := ParseAnthropicSSEChunk("content_block_start", data)
-	assert.Equal(t, []string{"get_weather"}, pr.ToolCalls)
-	assert.Equal(t, []string{""}, pr.ToolCallArgs)
+	assert.Equal(t, ParsedResponse{
+		ToolCalls:    []string{"get_weather"},
+		ToolCallArgs: []string{""},
+		rawToolCalls: []openaiToolCall{{
+			Index: 1,
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "get_weather"},
+		}},
+	}, pr)
 }
 
 func TestParseAnthropicSSEChunkContentBlockDeltaTextDelta(t *testing.T) {
@@ -728,10 +754,15 @@ func TestParseAnthropicSSEChunkContentBlockDeltaInputJSON(t *testing.T) {
 	t.Parallel()
 	data := `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"location\": \"San Fra"}}`
 	pr := ParseAnthropicSSEChunk("content_block_delta", data)
-	// Tool arg fragment stored in rawToolCalls for MergeSSEChunks.
-	assert.Equal(t, 1, len(pr.rawToolCalls))
-	assert.Equal(t, 1, pr.rawToolCalls[0].Index)
-	assert.Equal(t, `{"location": "San Fra`, pr.rawToolCalls[0].Function.Arguments)
+	assert.Equal(t, ParsedResponse{
+		rawToolCalls: []openaiToolCall{{
+			Index: 1,
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Arguments: `{"location": "San Fra`},
+		}},
+	}, pr)
 }
 
 func TestParseAnthropicSSEChunkMessageDelta(t *testing.T) {
