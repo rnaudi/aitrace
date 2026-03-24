@@ -312,14 +312,16 @@ func runOTel(cmd string, args []string, jsonOutput bool) {
 
 // sessionStats accumulates metrics across calls for the exit summary.
 type sessionStats struct {
-	mu           sync.Mutex
-	llmCalls     int
-	httpCalls    int
-	inputTokens  int64
-	outputTokens int64
-	llmDuration  time.Duration
-	models       map[string]int // model name -> call count
-	hosts        map[string]int // non-LLM host -> call count
+	mu               sync.Mutex
+	llmCalls         int
+	httpCalls        int
+	inputTokens      int64
+	outputTokens     int64
+	cacheReadTokens  int64
+	cacheWriteTokens int64
+	llmDuration      time.Duration
+	models           map[string]int // model name -> call count
+	hosts            map[string]int // non-LLM host -> call count
 }
 
 func (s *sessionStats) record(c capture.CapturedCall) {
@@ -330,6 +332,8 @@ func (s *sessionStats) record(c capture.CapturedCall) {
 		s.llmCalls++
 		s.inputTokens += c.InputTokens
 		s.outputTokens += c.OutputTokens
+		s.cacheReadTokens += c.CacheReadTokens
+		s.cacheWriteTokens += c.CacheWriteTokens
 		s.llmDuration += c.Duration
 
 		if model := c.EffectiveModel(); model != "" {
@@ -414,8 +418,11 @@ const (
 //
 // Normal: [aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1.2s
 // Tools:  [aitrace] #2 claude-opus-4.6 | tok: 19,659 in / 106 out | 3.8s | tools: skill,glob !large
-// Error:  [aitrace] #3 gpt-4o | 429 rate_limit_exceeded | 0.2s !error
-// Flags:  !large (total tokens > 10k), !long (duration > 10s), !error (status >= 400)
+// Cache:  [aitrace] #3 claude-3-5-sonnet | tok: 2,000 in / 500 out | 1.2s !cache
+// Error:  [aitrace] #4 gpt-4o | 429 rate_limit_exceeded | 0.2s !error
+// Flags:  !cache (prompt caching active), !large (total tokens > 10k),
+//
+//	!long (duration > 10s), !error (status >= 400)
 func formatCallLine(c capture.CapturedCall) string {
 	model := c.EffectiveModel()
 	if model == "" {
@@ -443,6 +450,9 @@ func formatCallLine(c capture.CapturedCall) string {
 	}
 
 	// Flags — appended at end.
+	if c.CacheReadTokens > 0 || c.CacheWriteTokens > 0 {
+		line += " !cache"
+	}
 	if c.InputTokens+c.OutputTokens > largeTokThreshold {
 		line += " !large"
 	}
@@ -511,6 +521,9 @@ type jsonCall struct {
 	ToolCalls    []string `json:"tool_calls,omitempty"`
 	ToolCallArgs []string `json:"tool_call_args,omitempty"`
 	ErrorMessage string   `json:"error_message,omitempty"`
+
+	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 }
 
 // formatCallJSON converts a CapturedCall to a single JSON line.
@@ -536,6 +549,9 @@ func formatCallJSON(c capture.CapturedCall) string {
 		ToolCalls:    c.ToolCalls,
 		ToolCallArgs: c.ToolCallArgs,
 		ErrorMessage: c.ErrorMessage,
+
+		CacheReadTokens:  c.CacheReadTokens,
+		CacheWriteTokens: c.CacheWriteTokens,
 	}
 	b, _ := json.Marshal(jc)
 	return string(b)
@@ -549,6 +565,8 @@ type jsonSummary struct {
 	HTTPCalls         int            `json:"http_calls"`
 	InputTokens       int64          `json:"input_tokens"`
 	OutputTokens      int64          `json:"output_tokens"`
+	CacheReadTokens   int64          `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens  int64          `json:"cache_write_tokens,omitempty"`
 	LLMDurationMs     int64          `json:"llm_duration_ms"`
 	SessionDurationMs int64          `json:"session_duration_ms"`
 	Models            map[string]int `json:"models,omitempty"`
@@ -564,6 +582,8 @@ func (s *sessionStats) printJSON(w io.Writer, sessionStart time.Time) {
 		HTTPCalls:         s.httpCalls,
 		InputTokens:       s.inputTokens,
 		OutputTokens:      s.outputTokens,
+		CacheReadTokens:   s.cacheReadTokens,
+		CacheWriteTokens:  s.cacheWriteTokens,
 		LLMDurationMs:     s.llmDuration.Milliseconds(),
 		SessionDurationMs: time.Since(sessionStart).Milliseconds(),
 		Models:            s.models,

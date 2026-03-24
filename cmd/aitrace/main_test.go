@@ -33,8 +33,41 @@ func TestSessionStatsRecordLLM(t *testing.T) {
 	assert.Equal(t, 0, stats.httpCalls)
 	assert.Equal(t, int64(100), stats.inputTokens)
 	assert.Equal(t, int64(50), stats.outputTokens)
+	assert.Equal(t, int64(0), stats.cacheReadTokens)
+	assert.Equal(t, int64(0), stats.cacheWriteTokens)
 	assert.Equal(t, 2*time.Second, stats.llmDuration)
 	assert.Equal(t, map[string]int{"gpt-4o": 1}, stats.models)
+}
+
+func TestSessionStatsRecordLLMWithCacheTokens(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.CapturedCall{
+		IsLLM:            true,
+		Model:            "claude-3-5-sonnet-20241022",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		Duration:         1 * time.Second,
+	})
+	stats.record(capture.CapturedCall{
+		IsLLM:           true,
+		Model:           "claude-3-5-sonnet-20241022",
+		InputTokens:     2000,
+		OutputTokens:    300,
+		CacheReadTokens: 1800,
+		Duration:        1 * time.Second,
+	})
+
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	assert.Equal(t, 2, stats.llmCalls)
+	assert.Equal(t, int64(4000), stats.inputTokens)
+	assert.Equal(t, int64(800), stats.outputTokens)
+	assert.Equal(t, int64(2600), stats.cacheReadTokens)
+	assert.Equal(t, int64(1500), stats.cacheWriteTokens)
 }
 
 func TestSessionStatsRecordHTTP(t *testing.T) {
@@ -287,6 +320,64 @@ func TestFormatCallLineNoFlags(t *testing.T) {
 	}, "[aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1s")
 }
 
+func TestFormatCallLineCacheFlag(t *testing.T) {
+	t.Parallel()
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:        1,
+		IsLLM:           true,
+		Model:           "claude-3-5-sonnet-20241022",
+		StatusCode:      200,
+		InputTokens:     2000,
+		OutputTokens:    500,
+		CacheReadTokens: 1500,
+		Duration:        1200 * time.Millisecond,
+	}, "[aitrace] #1 claude-3-5-sonnet-20241022 | tok: 2,000 in / 500 out | 1.2s !cache")
+}
+
+func TestFormatCallLineCacheWriteFlag(t *testing.T) {
+	t.Parallel()
+	// CacheWriteTokens alone should also trigger !cache.
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:         1,
+		IsLLM:            true,
+		Model:            "claude-3-5-sonnet-20241022",
+		StatusCode:       200,
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheWriteTokens: 1500,
+		Duration:         1200 * time.Millisecond,
+	}, "[aitrace] #1 claude-3-5-sonnet-20241022 | tok: 2,000 in / 500 out | 1.2s !cache")
+}
+
+func TestFormatCallLineNoCacheFlag(t *testing.T) {
+	t.Parallel()
+	// No cache tokens — no !cache flag.
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:     1,
+		IsLLM:        true,
+		Model:        "gpt-4o",
+		StatusCode:   200,
+		InputTokens:  500,
+		OutputTokens: 100,
+		Duration:     1 * time.Second,
+	}, "[aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1s")
+}
+
+func TestFormatCallLineCacheAndLargeFlags(t *testing.T) {
+	t.Parallel()
+	// Both !cache and !large should appear.
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:        1,
+		IsLLM:           true,
+		Model:           "claude-3-5-sonnet-20241022",
+		StatusCode:      200,
+		InputTokens:     12000,
+		OutputTokens:    1000,
+		CacheReadTokens: 10000,
+		Duration:        3 * time.Second,
+	}, "[aitrace] #1 claude-3-5-sonnet-20241022 | tok: 12,000 in / 1,000 out | 3s !cache !large")
+}
+
 func TestFormatCallLineErrorNoMessage(t *testing.T) {
 	t.Parallel()
 	checkFormatCallLine(t, capture.CapturedCall{
@@ -480,6 +571,53 @@ func TestFormatCallJSONToolCalls(t *testing.T) {
 	})
 }
 
+func TestFormatCallJSONWithCacheTokens(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 3, 24, 12, 0, 3, 0, time.UTC)
+	end := start.Add(1200 * time.Millisecond)
+
+	checkFormatCallJSON(t, capture.CapturedCall{
+		Sequence:         5,
+		Method:           "POST",
+		Host:             "api.anthropic.com",
+		Path:             "/v1/messages",
+		StatusCode:       200,
+		Duration:         1200 * time.Millisecond,
+		StartTime:        start,
+		EndTime:          end,
+		IsLLM:            true,
+		Provider:         "anthropic",
+		RequestModel:     "claude-3-5-sonnet-20241022",
+		Model:            "claude-3-5-sonnet-20241022",
+		ResponseID:       "msg_cache1",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		FinishReason:     "end_turn",
+	}, jsonCall{
+		Type:             "call",
+		Sequence:         5,
+		Method:           "POST",
+		Host:             "api.anthropic.com",
+		Path:             "/v1/messages",
+		StatusCode:       200,
+		DurationMs:       1200,
+		StartTime:        "2026-03-24T12:00:03Z",
+		EndTime:          "2026-03-24T12:00:04.2Z",
+		IsLLM:            true,
+		Provider:         "anthropic",
+		RequestModel:     "claude-3-5-sonnet-20241022",
+		Model:            "claude-3-5-sonnet-20241022",
+		ResponseID:       "msg_cache1",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		FinishReason:     "end_turn",
+	})
+}
+
 func TestFormatCallJSONIsValidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -565,7 +703,38 @@ func TestPrintJSONSummaryNoCalls(t *testing.T) {
 	assert.Equal(t, 0, got.HTTPCalls)
 	assert.Equal(t, int64(0), got.InputTokens)
 	assert.Equal(t, int64(0), got.OutputTokens)
+	assert.Equal(t, int64(0), got.CacheReadTokens)
+	assert.Equal(t, int64(0), got.CacheWriteTokens)
 	assert.Nil(t, got.Models)
+}
+
+func TestPrintJSONSummaryWithCacheTokens(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.CapturedCall{
+		IsLLM:            true,
+		Model:            "claude-3-5-sonnet-20241022",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		Duration:         1 * time.Second,
+	})
+
+	var buf bytes.Buffer
+	stats.printJSON(&buf, time.Now())
+
+	var got jsonSummary
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("printJSON produced invalid JSON: %v\nline: %s", err, buf.String())
+	}
+
+	assert.Equal(t, "summary", got.Type)
+	assert.Equal(t, int64(2000), got.InputTokens)
+	assert.Equal(t, int64(500), got.OutputTokens)
+	assert.Equal(t, int64(800), got.CacheReadTokens)
+	assert.Equal(t, int64(1500), got.CacheWriteTokens)
 }
 
 // --- doctor / probeHost tests ---

@@ -143,6 +143,12 @@ func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Cap
 		if call.OutputTokens > 0 {
 			attrs = append(attrs, attribute.Int64("gen_ai.usage.output_tokens", call.OutputTokens))
 		}
+		if call.CacheReadTokens > 0 {
+			attrs = append(attrs, attribute.Int64("gen_ai.usage.cache_read.input_tokens", call.CacheReadTokens))
+		}
+		if call.CacheWriteTokens > 0 {
+			attrs = append(attrs, attribute.Int64("gen_ai.usage.cache_creation.input_tokens", call.CacheWriteTokens))
+		}
 		if call.FinishReason != "" {
 			// Semantic convention defines finish_reasons as a string array to
 			// support multi-choice responses. We always emit a single element.

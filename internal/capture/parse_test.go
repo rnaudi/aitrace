@@ -136,6 +136,47 @@ func TestParseOpenAIResponseInvalidJSON(t *testing.T) {
 	assert.Equal(t, ParsedResponse{}, pr2)
 }
 
+func TestParseOpenAIResponseWithCachedTokens(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{
+		"id": "chatcmpl-cached1",
+		"model": "gpt-4o-2024-05-13",
+		"usage": {
+			"prompt_tokens": 2000,
+			"completion_tokens": 500,
+			"prompt_tokens_details": {
+				"cached_tokens": 1500,
+				"audio_tokens": 0
+			}
+		},
+		"choices": [{"finish_reason": "stop"}]
+	}`)
+
+	assert.Equal(t, ParsedResponse{
+		ID:              "chatcmpl-cached1",
+		Model:           "gpt-4o-2024-05-13",
+		InputTokens:     2000,
+		OutputTokens:    500,
+		CacheReadTokens: 1500,
+		FinishReason:    "stop",
+	}, ParseOpenAIResponse(body))
+}
+
+func TestParseOpenAIResponseWithoutPromptDetails(t *testing.T) {
+	t.Parallel()
+	// No prompt_tokens_details — CacheReadTokens should be zero.
+	body := []byte(`{
+		"id": "chatcmpl-nodetails",
+		"model": "gpt-4o",
+		"usage": {"prompt_tokens": 100, "completion_tokens": 50},
+		"choices": [{"finish_reason": "stop"}]
+	}`)
+
+	pr := ParseOpenAIResponse(body)
+	assert.Equal(t, int64(0), pr.CacheReadTokens)
+	assert.Equal(t, int64(0), pr.CacheWriteTokens)
+}
+
 func TestParseUnknownFormat(t *testing.T) {
 	t.Parallel()
 	// Anthropic format — should return zero values since we only parse OpenAI.
@@ -246,6 +287,20 @@ func TestParseOpenAISSEChunkNullFinishReason(t *testing.T) {
 	}, ParseOpenAISSEChunk(data))
 }
 
+func TestParseOpenAISSEChunkWithCachedTokens(t *testing.T) {
+	t.Parallel()
+	// Final SSE chunk with usage including prompt_tokens_details.
+	data := `{"id":"chatcmpl-abc","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2000,"completion_tokens":500,"prompt_tokens_details":{"cached_tokens":1500}}}`
+	assert.Equal(t, ParsedResponse{
+		ID:              "chatcmpl-abc",
+		Model:           "gpt-4o",
+		FinishReason:    "stop",
+		InputTokens:     2000,
+		OutputTokens:    500,
+		CacheReadTokens: 1500,
+	}, ParseOpenAISSEChunk(data))
+}
+
 func TestMergeSSEChunks(t *testing.T) {
 	t.Parallel()
 	chunks := []ParsedResponse{
@@ -275,6 +330,24 @@ func TestMergeSSEChunksSingle(t *testing.T) {
 	}
 	merged := MergeSSEChunks(chunks)
 	assert.Equal(t, chunks[0], merged)
+}
+
+func TestMergeSSEChunksWithCacheTokens(t *testing.T) {
+	t.Parallel()
+	// OpenAI: cache tokens arrive on the final chunk with usage.
+	chunks := []ParsedResponse{
+		{ID: "chatcmpl-cache", Model: "gpt-4o"},
+		{ID: "chatcmpl-cache", Model: "gpt-4o"},
+		{ID: "chatcmpl-cache", Model: "gpt-4o", FinishReason: "stop", InputTokens: 2000, OutputTokens: 500, CacheReadTokens: 1500},
+	}
+	assert.Equal(t, ParsedResponse{
+		ID:              "chatcmpl-cache",
+		Model:           "gpt-4o",
+		FinishReason:    "stop",
+		InputTokens:     2000,
+		OutputTokens:    500,
+		CacheReadTokens: 1500,
+	}, MergeSSEChunks(chunks))
 }
 
 func TestMergeSSEChunksProperties(t *testing.T) {
@@ -524,6 +597,56 @@ func TestParseAnthropicResponseInvalidJSON(t *testing.T) {
 	assert.Equal(t, ParsedResponse{}, ParseAnthropicResponse(nil))
 }
 
+func TestParseAnthropicResponseWithCacheTokens(t *testing.T) {
+	t.Parallel()
+	checkParseAnthropicResponse(t, `{
+		"id": "msg_cache1",
+		"type": "message",
+		"model": "claude-3-5-sonnet-20241022",
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 2000,
+			"output_tokens": 500,
+			"cache_creation_input_tokens": 1500,
+			"cache_read_input_tokens": 800
+		},
+		"content": [{"type": "text", "text": "Hello!"}]
+	}`, ParsedResponse{
+		ID:               "msg_cache1",
+		Model:            "claude-3-5-sonnet-20241022",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		FinishReason:     "end_turn",
+	})
+}
+
+func TestParseAnthropicResponseCacheReadOnly(t *testing.T) {
+	t.Parallel()
+	// Only cache_read_input_tokens, no cache_creation — subsequent calls
+	// that hit an existing cache entry.
+	checkParseAnthropicResponse(t, `{
+		"id": "msg_cache2",
+		"type": "message",
+		"model": "claude-3-5-sonnet-20241022",
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 2000,
+			"output_tokens": 300,
+			"cache_read_input_tokens": 1800
+		},
+		"content": [{"type": "text", "text": "Hi!"}]
+	}`, ParsedResponse{
+		ID:              "msg_cache2",
+		Model:           "claude-3-5-sonnet-20241022",
+		InputTokens:     2000,
+		OutputTokens:    300,
+		CacheReadTokens: 1800,
+		FinishReason:    "end_turn",
+	})
+}
+
 func TestParseAnthropicResponseProperties(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
@@ -564,6 +687,18 @@ func TestParseAnthropicSSEChunkMessageStart(t *testing.T) {
 		ID:          "msg_sse1",
 		Model:       "claude-3-opus-20240229",
 		InputTokens: 25,
+	}, ParseAnthropicSSEChunk("message_start", data))
+}
+
+func TestParseAnthropicSSEChunkMessageStartWithCache(t *testing.T) {
+	t.Parallel()
+	data := `{"type":"message_start","message":{"id":"msg_sse_cache","type":"message","role":"assistant","content":[],"model":"claude-3-5-sonnet-20241022","stop_reason":null,"usage":{"input_tokens":2000,"output_tokens":1,"cache_creation_input_tokens":1500,"cache_read_input_tokens":800}}}`
+	assert.Equal(t, ParsedResponse{
+		ID:               "msg_sse_cache",
+		Model:            "claude-3-5-sonnet-20241022",
+		InputTokens:      2000,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
 	}, ParseAnthropicSSEChunk("message_start", data))
 }
 
@@ -643,6 +778,25 @@ func TestMergeAnthropicSSEChunks(t *testing.T) {
 		InputTokens:  25,
 		OutputTokens: 15,
 		FinishReason: "end_turn",
+	}, MergeSSEChunks(chunks))
+}
+
+func TestMergeAnthropicSSEChunksWithCache(t *testing.T) {
+	t.Parallel()
+	// Cache tokens arrive in message_start alongside input_tokens.
+	chunks := []ParsedResponse{
+		{ID: "msg_sse_cache", Model: "claude-3-5-sonnet-20241022", InputTokens: 2000, CacheReadTokens: 800, CacheWriteTokens: 1500},
+		// text_delta chunks omitted
+		{FinishReason: "end_turn", OutputTokens: 500},
+	}
+	assert.Equal(t, ParsedResponse{
+		ID:               "msg_sse_cache",
+		Model:            "claude-3-5-sonnet-20241022",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		FinishReason:     "end_turn",
 	}, MergeSSEChunks(chunks))
 }
 

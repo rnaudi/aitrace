@@ -59,8 +59,15 @@ type openaiResponse struct {
 }
 
 type openaiUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
+	PromptTokens        int64                `json:"prompt_tokens"`
+	CompletionTokens    int64                `json:"completion_tokens"`
+	PromptTokensDetails *openaiPromptDetails `json:"prompt_tokens_details"`
+}
+
+// openaiPromptDetails is the nested prompt_tokens_details object in OpenAI
+// responses. Only cached_tokens is relevant for cost; audio_tokens is ignored.
+type openaiPromptDetails struct {
+	CachedTokens int64 `json:"cached_tokens"`
 }
 
 type openaiChoice struct {
@@ -88,6 +95,13 @@ type ParsedResponse struct {
 	ToolCalls    []string // tool function names the model invoked
 	ToolCallArgs []string // JSON argument strings, parallel to ToolCalls
 
+	// Cache token fields are provider-normalized:
+	// - OpenAI: cached_tokens → CacheReadTokens (50% discount, no write cost)
+	// - Anthropic: cache_read_input_tokens → CacheReadTokens (90% discount),
+	//   cache_creation_input_tokens → CacheWriteTokens (25% surcharge)
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+
 	// rawToolCalls carries per-chunk tool call data including the index
 	// field. Only populated by ParseOpenAISSEChunk for use in MergeSSEChunks
 	// which needs the index to accumulate argument fragments across chunks.
@@ -108,6 +122,9 @@ func ParseOpenAIResponse(body []byte) ParsedResponse {
 	if resp.Usage != nil {
 		pr.InputTokens = resp.Usage.PromptTokens
 		pr.OutputTokens = resp.Usage.CompletionTokens
+		if resp.Usage.PromptTokensDetails != nil {
+			pr.CacheReadTokens = resp.Usage.PromptTokensDetails.CachedTokens
+		}
 	}
 
 	if len(resp.Choices) > 0 {
@@ -171,6 +188,9 @@ func ParseOpenAISSEChunk(data string) ParsedResponse {
 	if chunk.Usage != nil {
 		pr.InputTokens = chunk.Usage.PromptTokens
 		pr.OutputTokens = chunk.Usage.CompletionTokens
+		if chunk.Usage.PromptTokensDetails != nil {
+			pr.CacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+		}
 	}
 
 	if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != nil {
@@ -223,6 +243,12 @@ func MergeSSEChunks(chunks []ParsedResponse) ParsedResponse {
 		if c.OutputTokens > 0 {
 			merged.OutputTokens = c.OutputTokens
 		}
+		if c.CacheReadTokens > 0 {
+			merged.CacheReadTokens = c.CacheReadTokens
+		}
+		if c.CacheWriteTokens > 0 {
+			merged.CacheWriteTokens = c.CacheWriteTokens
+		}
 		for _, tc := range c.rawToolCalls {
 			if toolCalls == nil {
 				toolCalls = make(map[int]*toolCallAcc)
@@ -271,9 +297,14 @@ type anthropicResponse struct {
 	Type       string             `json:"type"` // "message" for responses, "error" for errors
 }
 
+// anthropicUsage is the usage object in Anthropic Messages API responses.
+// Cache fields are present when prompt caching is active: cache_creation has
+// a 25% surcharge, cache_read is 90% cheaper than regular input tokens.
 type anthropicUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 }
 
 // anthropicContent represents one block in the response content array.
@@ -302,6 +333,8 @@ func ParseAnthropicResponse(body []byte) ParsedResponse {
 	if resp.Usage != nil {
 		pr.InputTokens = resp.Usage.InputTokens
 		pr.OutputTokens = resp.Usage.OutputTokens
+		pr.CacheReadTokens = resp.Usage.CacheReadInputTokens
+		pr.CacheWriteTokens = resp.Usage.CacheCreationInputTokens
 	}
 
 	for _, block := range resp.Content {
@@ -384,6 +417,8 @@ func parseAnthropicMessageStart(event anthropicSSEEvent) ParsedResponse {
 	pr.Model = msg.Model
 	if msg.Usage != nil {
 		pr.InputTokens = msg.Usage.InputTokens
+		pr.CacheReadTokens = msg.Usage.CacheReadInputTokens
+		pr.CacheWriteTokens = msg.Usage.CacheCreationInputTokens
 	}
 	return pr
 }

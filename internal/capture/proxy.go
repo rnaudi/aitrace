@@ -338,6 +338,8 @@ func (p *Proxy) SSEEnd(f *proxy.Flow) {
 		call.FinishReason = merged.FinishReason
 		call.ToolCalls = merged.ToolCalls
 		call.ToolCallArgs = merged.ToolCallArgs
+		call.CacheReadTokens = merged.CacheReadTokens
+		call.CacheWriteTokens = merged.CacheWriteTokens
 	}
 
 	p.recordCall(call)
@@ -418,6 +420,8 @@ func parseNonStreamingResponse(call *CapturedCall, body []byte) {
 	call.FinishReason = pr.FinishReason
 	call.ToolCalls = pr.ToolCalls
 	call.ToolCallArgs = pr.ToolCallArgs
+	call.CacheReadTokens = pr.CacheReadTokens
+	call.CacheWriteTokens = pr.CacheWriteTokens
 }
 
 // parseSSEChunk dispatches to the provider-specific SSE chunk parser.

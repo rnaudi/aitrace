@@ -135,8 +135,80 @@ func TestEmitSpanOmitsZeroTokens(t *testing.T) {
 	attrMap := spanAttrMap(spans[0])
 	_, hasInput := attrMap["gen_ai.usage.input_tokens"]
 	_, hasOutput := attrMap["gen_ai.usage.output_tokens"]
+	_, hasCacheRead := attrMap["gen_ai.usage.cache_read.input_tokens"]
+	_, hasCacheWrite := attrMap["gen_ai.usage.cache_creation.input_tokens"]
 	assert.False(t, hasInput, "should not have input_tokens when 0")
 	assert.False(t, hasOutput, "should not have output_tokens when 0")
+	assert.False(t, hasCacheRead, "should not have cache_read tokens when 0")
+	assert.False(t, hasCacheWrite, "should not have cache_creation tokens when 0")
+}
+
+func TestEmitSpanCacheTokenAttributes(t *testing.T) {
+	t.Parallel()
+
+	tp, exporter := newTestTracerProvider(t)
+
+	call := capture.CapturedCall{
+		Method:           "POST",
+		Host:             "api.anthropic.com",
+		Path:             "/v1/messages",
+		StatusCode:       200,
+		Duration:         1200 * time.Millisecond,
+		Sequence:         1,
+		IsLLM:            true,
+		Provider:         capture.ProviderAnthropic,
+		Model:            "claude-3-5-sonnet-20241022",
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		FinishReason:     "end_turn",
+	}
+
+	EmitSpan(t.Context(), tp, call)
+	tp.ForceFlush(t.Context())
+
+	spans := exporter.GetSpans()
+	assert.Equal(t, 1, len(spans))
+
+	attrMap := spanAttrMap(spans[0])
+	assert.Equal(t, attribute.Int64Value(2000), attrMap["gen_ai.usage.input_tokens"])
+	assert.Equal(t, attribute.Int64Value(500), attrMap["gen_ai.usage.output_tokens"])
+	assert.Equal(t, attribute.Int64Value(800), attrMap["gen_ai.usage.cache_read.input_tokens"])
+	assert.Equal(t, attribute.Int64Value(1500), attrMap["gen_ai.usage.cache_creation.input_tokens"])
+}
+
+func TestEmitSpanCacheReadOnlyAttribute(t *testing.T) {
+	t.Parallel()
+
+	tp, exporter := newTestTracerProvider(t)
+
+	call := capture.CapturedCall{
+		Method:          "POST",
+		Host:            "api.openai.com",
+		Path:            "/v1/chat/completions",
+		StatusCode:      200,
+		Duration:        1 * time.Second,
+		Sequence:        1,
+		IsLLM:           true,
+		Provider:        capture.ProviderOpenAI,
+		Model:           "gpt-4o",
+		InputTokens:     2000,
+		OutputTokens:    500,
+		CacheReadTokens: 1500,
+		FinishReason:    "stop",
+	}
+
+	EmitSpan(t.Context(), tp, call)
+	tp.ForceFlush(t.Context())
+
+	spans := exporter.GetSpans()
+	assert.Equal(t, 1, len(spans))
+
+	attrMap := spanAttrMap(spans[0])
+	assert.Equal(t, attribute.Int64Value(1500), attrMap["gen_ai.usage.cache_read.input_tokens"])
+	_, hasCacheWrite := attrMap["gen_ai.usage.cache_creation.input_tokens"]
+	assert.False(t, hasCacheWrite, "OpenAI has no cache write cost — attribute should be absent")
 }
 
 func TestEmitSpanClientKind(t *testing.T) {

@@ -25,6 +25,13 @@ type CapturedCall struct {
 	ToolCalls    []string // tool function names the model invoked
 	ToolCallArgs []string // JSON argument strings, parallel to ToolCalls
 	ErrorMessage string   // error message from 4xx/5xx responses
+
+	// Cache token fields (provider-normalized).
+	// OpenAI: cached_tokens → CacheReadTokens (50% input discount, no write cost).
+	// Anthropic: cache_read_input_tokens → CacheReadTokens (90% discount),
+	//   cache_creation_input_tokens → CacheWriteTokens (25% surcharge).
+	CacheReadTokens  int64
+	CacheWriteTokens int64
 }
 
 // EffectiveModel returns the response model, falling back to the request
