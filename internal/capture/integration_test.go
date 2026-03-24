@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/rnaudi/aitrace/internal/capture"
-	aitrace "github.com/rnaudi/aitrace/internal/trace"
+	"github.com/rnaudi/aitrace/internal/trace"
 
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
@@ -36,13 +36,11 @@ func startTestProxyWithOpts(t *testing.T, opts capture.ProxyOptions) *capture.Pr
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := p.Start(); err != nil && !strings.Contains(err.Error(), "closed") {
 			// Start returns error on shutdown; ignore it.
 		}
-	}()
+	})
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -110,7 +108,7 @@ func TestIntegrationProxyParseOTel(t *testing.T) {
 			mu.Lock()
 			capturedCalls = append(capturedCalls, c)
 			mu.Unlock()
-			aitrace.EmitSpan(t.Context(), tp, c)
+			trace.EmitSpan(t.Context(), tp, c)
 		},
 	})
 
@@ -225,7 +223,7 @@ func TestIntegrationProxyParseOTelSSE(t *testing.T) {
 			mu.Lock()
 			capturedCalls = append(capturedCalls, c)
 			mu.Unlock()
-			aitrace.EmitSpan(t.Context(), tp, c)
+			trace.EmitSpan(t.Context(), tp, c)
 		},
 	})
 

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -21,7 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +30,7 @@ import (
 	"github.com/rnaudi/aitrace/internal/capture"
 	"github.com/rnaudi/aitrace/internal/cert"
 	"github.com/rnaudi/aitrace/internal/run"
-	aitrace "github.com/rnaudi/aitrace/internal/trace"
+	"github.com/rnaudi/aitrace/internal/trace"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -165,7 +166,7 @@ func runTerminal(cmd string, args []string, jsonOutput bool) {
 		os.Exit(1)
 	}
 
-	exitCode, _, err := run.RunChild(run.RunOptions{
+	exitCode, _, err := run.Child(run.Options{
 		ProxyAddr:       p.Addr(),
 		CombinedPEMPath: pemPath,
 		Command:         cmd,
@@ -193,7 +194,7 @@ func runTerminal(cmd string, args []string, jsonOutput bool) {
 // When jsonOutput is true, JSONL replaces human-readable output.
 func runOTel(cmd string, args []string, jsonOutput bool) {
 	ctx := context.Background()
-	tp, err := aitrace.NewTracerProvider(ctx, aitrace.TracerOptions{
+	tp, err := trace.NewTracerProvider(ctx, trace.TracerOptions{
 		ServiceName: filepath.Base(cmd),
 	})
 	if err != nil {
@@ -208,7 +209,7 @@ func runOTel(cmd string, args []string, jsonOutput bool) {
 		}
 	}()
 
-	ctx, sessionSpan := aitrace.StartSessionSpan(ctx, tp, filepath.Base(cmd))
+	ctx, sessionSpan := trace.StartSessionSpan(ctx, tp, filepath.Base(cmd))
 
 	sessionStart := time.Now()
 	var stats sessionStats
@@ -220,7 +221,7 @@ func runOTel(cmd string, args []string, jsonOutput bool) {
 			} else if c.IsLLM {
 				fmt.Fprintln(os.Stderr, formatCallLine(c))
 			}
-			aitrace.EmitSpan(ctx, tp, c)
+			trace.EmitSpan(ctx, tp, c)
 		},
 	})
 	if err != nil {
@@ -267,7 +268,7 @@ func runOTel(cmd string, args []string, jsonOutput bool) {
 		os.Exit(1)
 	}
 
-	exitCode, childPID, err := run.RunChild(run.RunOptions{
+	exitCode, childPID, err := run.Child(run.Options{
 		ProxyAddr:       p.Addr(),
 		CombinedPEMPath: pemPath,
 		Command:         cmd,
@@ -394,8 +395,8 @@ func formatCountsDesc(m map[string]int) string {
 	for k, c := range m {
 		sorted = append(sorted, kc{k, c})
 	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].count > sorted[j].count
+	slices.SortFunc(sorted, func(a, b kc) int {
+		return cmp.Compare(b.count, a.count)
 	})
 
 	var b strings.Builder
@@ -635,12 +636,10 @@ func probeHost(client *http.Client, host string) probeResult {
 // classifyProbeError returns a short human-readable diagnosis and a
 // suggested action for the given probe error.
 func classifyProbeError(err error) (diagnosis, hint string) {
-	var certErr *tls.CertificateVerificationError
-	if errors.As(err, &certErr) {
+	if certErr, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
 		return certErr.Err.Error(), "your network may use a corporate proxy with custom CAs"
 	}
-	var unknownAuthErr x509.UnknownAuthorityError
-	if errors.As(err, &unknownAuthErr) {
+	if _, ok := errors.AsType[x509.UnknownAuthorityError](err); ok {
 		return "x509: certificate signed by unknown authority",
 			"your network may use a corporate proxy with custom CAs"
 	}

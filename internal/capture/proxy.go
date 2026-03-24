@@ -166,6 +166,8 @@ func (p *Proxy) Start() error {
 	return p.inner.Start()
 }
 
+// Stop gracefully shuts down the proxy with a 2-second timeout.
+// Call Wait() after Stop() to ensure all in-flight hooks have completed.
 func (p *Proxy) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

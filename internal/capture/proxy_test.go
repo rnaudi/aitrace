@@ -26,13 +26,11 @@ func startTestProxyWithOpts(t *testing.T, opts ProxyOptions) *Proxy {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := p.Start(); err != nil && !strings.Contains(err.Error(), "closed") {
 			// Start returns error on shutdown; ignore it.
 		}
-	}()
+	})
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
@@ -204,7 +202,7 @@ func TestProxyOnCallCallback(t *testing.T) {
 
 	client := proxyClient(t, p)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		resp, err := client.Get(fakeServer.URL + "/v1/chat/completions")
 		if err != nil {
 			t.Fatalf("request %d: %v", i, err)

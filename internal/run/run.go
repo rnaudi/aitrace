@@ -5,6 +5,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,17 +13,17 @@ import (
 	"syscall"
 )
 
-// RunOptions configures the child process.
-type RunOptions struct {
+// Options configures the child process.
+type Options struct {
 	ProxyAddr       string // "host:port"
 	CombinedPEMPath string
 	Command         string
 	Args            []string
 }
 
-// RunChild spawns a child process with proxy env vars, pipes its stdio,
+// Child spawns a child process with proxy env vars, pipes its stdio,
 // and returns (exitCode, pid, error).
-func RunChild(opts RunOptions) (int, int, error) {
+func Child(opts Options) (int, int, error) {
 	cmd := exec.Command(opts.Command, opts.Args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -78,7 +79,7 @@ func RunChild(opts RunOptions) (int, int, error) {
 		return 0, childPID, nil
 	}
 
-	if exitErr, ok := waitErr.(*exec.ExitError); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](waitErr); ok {
 		return exitErr.ExitCode(), childPID, nil
 	}
 
