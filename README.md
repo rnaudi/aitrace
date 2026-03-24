@@ -2,6 +2,14 @@
 
 zero-config agent tracer
 
+## Install
+
+```sh
+brew install rnaudi/tap/aitrace
+```
+
+Or download a binary from [releases](https://github.com/rnaudi/aitrace/releases).
+
 ```sh
 aitrace run -- opencode "refactor the auth module"
 [aitrace] #1 gpt-4o | tok: 537 in / 19 out | 857ms
