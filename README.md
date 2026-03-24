@@ -63,3 +63,8 @@ aitrace doctor                                   # check TLS connectivity
 | OTel native              | yes     | yes      | no       | yes         | no       |
 | Data stays local         | yes     | self-host| no       | depends     | no       |
 | Language-agnostic        | yes     | no       | no       | no          | yes      |
+
+## Example
+
+<img width="812" height="923" alt="Screenshot 2026-03-24 at 17 46 04" src="https://github.com/user-attachments/assets/3944f9e4-1d49-4937-8093-c7a491219b2d" />
+
