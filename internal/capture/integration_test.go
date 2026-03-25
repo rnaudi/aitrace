@@ -30,6 +30,7 @@ import (
 func startTestProxyWithOpts(t *testing.T, opts capture.ProxyOptions) *capture.Proxy {
 	t.Helper()
 
+	opts.SslInsecure = true // test servers use self-signed certs
 	p, err := capture.NewProxy(opts)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)

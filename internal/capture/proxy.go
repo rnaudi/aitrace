@@ -7,6 +7,12 @@
 // Why: go-mitmproxy's Response() hook never fires for SSE streams
 // (Content-Type: text/event-stream). We use SSEStart/SSEMessage/SSEEnd
 // instead and merge chunks into a single CapturedCall at stream end.
+//
+// Design: All addon hooks that can panic (SSE hooks, Response) have
+// defer/recover so a parsing bug cannot crash the proxy goroutine.
+// SSEStart uses a committed flag to call hookWg.Done() only when the
+// flow was not stored in sseFlows (otherwise SSEEnd handles it).
+// Wait() has a hard timeout as a safety net against unbalanced hookWg.
 package capture
 
 import (
@@ -15,6 +21,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,6 +57,9 @@ type ProxyOptions struct {
 	Wildcards []string
 	// OnCall is invoked for each intercepted call. May be nil.
 	OnCall func(CapturedCall)
+	// SslInsecure disables upstream TLS certificate verification.
+	// Default (false) verifies upstream certs against the system CA bundle.
+	SslInsecure bool
 }
 
 // sseFlow tracks an in-flight SSE stream for a single proxy flow.
@@ -110,11 +120,10 @@ func NewProxy(opts ProxyOptions) (*Proxy, error) {
 
 	proxyOpts := &proxy.Options{
 		Addr: addr,
-		// TODO: SslInsecure disables upstream TLS verification for all traffic,
-		// meaning a MITM between aitrace and the real API would go undetected.
-		// Fix in M7 (certificate trust UX): configure upstream TLS to verify
-		// against the system CA bundle instead.
-		SslInsecure: true,
+		// Default (SslInsecure=false) verifies upstream TLS certs against the
+		// system CA bundle. Tests pass SslInsecure=true because httptest servers
+		// use self-signed certs not in the system trust store.
+		SslInsecure: opts.SslInsecure,
 		NewCaFunc:   cert.NewSelfSignCAMemory,
 	}
 
@@ -181,8 +190,29 @@ func (p *Proxy) Stop() error {
 // Wait blocks until all in-flight addon hooks (Response, SSE flows)
 // have completed their OnCall callbacks. Call after Stop() to ensure
 // no callbacks are missed before reading stats or shutting down.
+//
+// Why: A hard 5-second timeout prevents hanging forever if a hook panic
+// causes an unbalanced hookWg (Add without Done). This shouldn't happen
+// with the recovery defers, but the timeout is a safety net.
 func (p *Proxy) Wait() {
-	p.hookWg.Wait()
+	done := make(chan struct{})
+	go func() {
+		p.hookWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		fmt.Fprintf(os.Stderr, "[aitrace] warning: timed out waiting for in-flight hooks\n")
+	}
+}
+
+// recoverHook logs a recovered panic from a proxy addon hook.
+// Use as: defer recoverHook("SSEMessage")
+func recoverHook(hook string) {
+	if r := recover(); r != nil {
+		fmt.Fprintf(os.Stderr, "[aitrace] recovered panic in %s: %v\n", hook, r)
+	}
 }
 
 // WaitForProxy blocks until a TCP connection to addr succeeds or ctx is
@@ -252,6 +282,20 @@ func (p *Proxy) SSEStart(f *proxy.Flow) {
 	// Track this SSE flow so Wait() blocks until SSEEnd fires and OnCall completes.
 	p.hookWg.Add(1)
 
+	// Why: committed tracks whether the flow was stored in sseFlows. If a panic
+	// occurs before that, SSEEnd will never fire for this flow, so the defer
+	// must call hookWg.Done() to avoid hanging Wait(). Once stored, SSEEnd
+	// handles the Done().
+	committed := false
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "[aitrace] recovered panic in SSEStart: %v\n", r)
+			if !committed {
+				p.hookWg.Done()
+			}
+		}
+	}()
+
 	host := stripPort(f.Request.URL.Host)
 	isLLM := p.isLLMHost(host)
 
@@ -274,9 +318,12 @@ func (p *Proxy) SSEStart(f *proxy.Flow) {
 	p.sseMu.Lock()
 	p.sseFlows[f.Id] = sf
 	p.sseMu.Unlock()
+	committed = true
 }
 
 func (p *Proxy) SSEMessage(f *proxy.Flow) {
+	defer recoverHook("SSEMessage")
+
 	p.sseMu.Lock()
 	sf, ok := p.sseFlows[f.Id]
 	p.sseMu.Unlock()
@@ -307,6 +354,7 @@ func (p *Proxy) SSEMessage(f *proxy.Flow) {
 
 func (p *Proxy) SSEEnd(f *proxy.Flow) {
 	defer p.hookWg.Done()
+	defer recoverHook("SSEEnd")
 
 	p.sseMu.Lock()
 	sf, ok := p.sseFlows[f.Id]
@@ -360,6 +408,7 @@ func (p *Proxy) HTTPConnectError(f *proxy.Flow, err error) {}
 func (p *Proxy) Response(f *proxy.Flow) {
 	p.hookWg.Add(1)
 	defer p.hookWg.Done()
+	defer recoverHook("Response")
 
 	host := stripPort(f.Request.URL.Host)
 	isLLM := p.isLLMHost(host)

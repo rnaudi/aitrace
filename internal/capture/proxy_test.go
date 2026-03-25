@@ -20,6 +20,7 @@ import (
 func startTestProxyWithOpts(t *testing.T, opts ProxyOptions) *Proxy {
 	t.Helper()
 
+	opts.SslInsecure = true // test servers use self-signed certs
 	p, err := NewProxy(opts)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
@@ -906,4 +907,106 @@ func TestProxyAnthropicSSEFullStream(t *testing.T) {
 		ToolCalls:    []string{"read_file"},
 		ToolCallArgs: []string{`{"path":"foo.txt"}`},
 	}, merged)
+}
+
+// TestResponsePanicDoesNotHangWait verifies that a panic in the Response hook
+// (via OnCall) is recovered and Wait() still returns promptly.
+func TestResponsePanicDoesNotHangWait(t *testing.T) {
+	t.Parallel()
+
+	fakeServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"panic-1","model":"gpt-4o","usage":{"prompt_tokens":10,"completion_tokens":5},"choices":[{"finish_reason":"stop","message":{"content":"hi"}}]}`))
+	}))
+	defer fakeServer.Close()
+
+	serverURL, _ := url.Parse(fakeServer.URL)
+
+	p := startTestProxyWithOpts(t, ProxyOptions{
+		Hosts: []string{serverURL.Hostname()},
+		OnCall: func(c CapturedCall) {
+			panic("intentional test panic in OnCall")
+		},
+	})
+	client := proxyClient(t, p)
+
+	resp, err := client.Get(fakeServer.URL + "/v1/chat/completions")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	// Stop + Wait must return promptly despite the panic.
+	p.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		p.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — Wait() returned
+	case <-time.After(3 * time.Second):
+		t.Fatal("Wait() hung after OnCall panic")
+	}
+}
+
+// TestSSEPanicDoesNotHangWait verifies that a panic in the SSE flow path
+// (via OnCall in SSEEnd) is recovered and Wait() still returns promptly.
+func TestSSEPanicDoesNotHangWait(t *testing.T) {
+	t.Parallel()
+
+	fakeServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: %s\n\n", `{"id":"panic-sse","model":"gpt-4o","choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`)
+		flusher.Flush()
+		fmt.Fprintf(w, "data: %s\n\n", `{"id":"panic-sse","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer fakeServer.Close()
+
+	serverURL, _ := url.Parse(fakeServer.URL)
+
+	p := startTestProxyWithOpts(t, ProxyOptions{
+		Hosts: []string{serverURL.Hostname()},
+		OnCall: func(c CapturedCall) {
+			panic("intentional test panic in OnCall (SSE)")
+		},
+	})
+	client := proxyClient(t, p)
+
+	resp, err := client.Post(
+		fakeServer.URL+"/v1/chat/completions",
+		"application/json",
+		strings.NewReader(`{"model":"gpt-4o","stream":true}`),
+	)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	p.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		p.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — Wait() returned
+	case <-time.After(3 * time.Second):
+		t.Fatal("Wait() hung after OnCall panic in SSE flow")
+	}
 }
