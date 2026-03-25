@@ -167,6 +167,51 @@ func TestSessionStatsRecordHTTPEmptyHost(t *testing.T) {
 	assert.Nil(t, stats.hosts)
 }
 
+func TestSessionStatsRecordAccumulatesCost(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.CapturedCall{
+		IsLLM:        true,
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		InputTokens:  1000,
+		OutputTokens: 500,
+		Duration:     1 * time.Second,
+	})
+	stats.record(capture.CapturedCall{
+		IsLLM:        true,
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4",
+		InputTokens:  2000,
+		OutputTokens: 1000,
+		Duration:     2 * time.Second,
+	})
+
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	// gpt-4o:          1000 * $2.50/1M + 500 * $10.00/1M = $0.0075
+	// claude-sonnet-4: 2000 * $3.00/1M + 1000 * $15.00/1M = $0.021
+	assert.InDelta(t, 0.0285, stats.totalCost, 0.0001)
+}
+
+func TestSessionStatsRecordNoCostWithoutProvider(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.CapturedCall{
+		IsLLM:        true,
+		Model:        "gpt-4o",
+		InputTokens:  1000,
+		OutputTokens: 500,
+		Duration:     1 * time.Second,
+	})
+
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	assert.Equal(t, float64(0), stats.totalCost)
+}
+
 func TestSessionStatsPrintNoCalls(t *testing.T) {
 	t.Parallel()
 
@@ -392,6 +437,53 @@ func TestFormatCallLineErrorNoMessage(t *testing.T) {
 	}, "[aitrace] #1 gpt-4o | 500 | 100ms !error")
 }
 
+func TestFormatCallLineWithCost(t *testing.T) {
+	t.Parallel()
+	// Provider set → cost.Calculate returns a non-zero value → cost appears.
+	// gpt-4o: 500 * $2.50/1M + 100 * $10.00/1M = $0.00225
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:     1,
+		IsLLM:        true,
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		StatusCode:   200,
+		InputTokens:  500,
+		OutputTokens: 100,
+		Duration:     1200 * time.Millisecond,
+	}, "[aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1.2s | $0.002")
+}
+
+func TestFormatCallLineWithCostAndTools(t *testing.T) {
+	t.Parallel()
+	// Cost appears after duration, before tools.
+	// claude-3-5-sonnet: 10568 * $3.00/1M + 268 * $15.00/1M = 0.031704 + 0.00402 = 0.035724
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:     2,
+		IsLLM:        true,
+		Provider:     "anthropic",
+		Model:        "claude-3-5-sonnet-20241022",
+		StatusCode:   200,
+		InputTokens:  10568,
+		OutputTokens: 268,
+		ToolCalls:    []string{"read_file", "grep"},
+		Duration:     4500 * time.Millisecond,
+	}, "[aitrace] #2 claude-3-5-sonnet-20241022 | tok: 10,568 in / 268 out | 4.5s | $0.036 | tools: read_file,grep !large")
+}
+
+func TestFormatCallLineErrorNoCost(t *testing.T) {
+	t.Parallel()
+	// Error calls with provider still shouldn't show cost (no tokens parsed).
+	checkFormatCallLine(t, capture.CapturedCall{
+		Sequence:     1,
+		IsLLM:        true,
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		StatusCode:   429,
+		ErrorMessage: "rate_limit_exceeded",
+		Duration:     200 * time.Millisecond,
+	}, "[aitrace] #1 gpt-4o | 429 rate_limit_exceeded | 200ms !error")
+}
+
 func TestFormatTokenCount(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "0", formatTokenCount(0))
@@ -410,6 +502,7 @@ func TestFormatTokenCount(t *testing.T) {
 
 // checkFormatCallJSON verifies that formatCallJSON produces valid JSON that
 // round-trips through jsonCall and matches the expected struct.
+// Cost uses InDelta for floating-point precision.
 func checkFormatCallJSON(t *testing.T, c capture.CapturedCall, want jsonCall) {
 	t.Helper()
 	line := formatCallJSON(c)
@@ -418,6 +511,10 @@ func checkFormatCallJSON(t *testing.T, c capture.CapturedCall, want jsonCall) {
 	if err := json.Unmarshal([]byte(line), &got); err != nil {
 		t.Fatalf("formatCallJSON produced invalid JSON: %v\nline: %s", err, line)
 	}
+
+	assert.InDelta(t, want.Cost, got.Cost, 0.0001)
+	want.Cost = got.Cost
+
 	assert.Equal(t, want, got)
 }
 
@@ -461,6 +558,7 @@ func TestFormatCallJSONLLMCall(t *testing.T) {
 		InputTokens:  847,
 		OutputTokens: 512,
 		FinishReason: "stop",
+		Cost:         0.007237500000000001,
 	})
 }
 
@@ -571,6 +669,7 @@ func TestFormatCallJSONToolCalls(t *testing.T) {
 		FinishReason: "tool_use",
 		ToolCalls:    []string{"read_file", "grep"},
 		ToolCallArgs: []string{`{"path":"foo.go"}`, `{"pattern":"TODO"}`},
+		Cost:         0.035724000000000006,
 	})
 }
 
@@ -618,6 +717,7 @@ func TestFormatCallJSONWithCacheTokens(t *testing.T) {
 		CacheReadTokens:  800,
 		CacheWriteTokens: 1500,
 		FinishReason:     "end_turn",
+		Cost:             0.019365,
 	})
 }
 
@@ -640,7 +740,8 @@ func TestFormatCallJSONIsValidJSON(t *testing.T) {
 
 // checkPrintJSON calls printJSON on stats and asserts the result matches want.
 // SessionDurationMs is non-deterministic, so it's verified as >= 0 then zeroed
-// before the whole-value comparison.
+// before the whole-value comparison. TotalCost uses InDelta for floating-point
+// precision, then is copied from got to want before the struct comparison.
 func checkPrintJSON(t *testing.T, stats *sessionStats, envs []envtags.Env, want jsonSummary) {
 	t.Helper()
 	var buf bytes.Buffer
@@ -653,6 +754,10 @@ func checkPrintJSON(t *testing.T, stats *sessionStats, envs []envtags.Env, want 
 
 	assert.GreaterOrEqual(t, got.SessionDurationMs, int64(0))
 	got.SessionDurationMs = 0
+
+	assert.InDelta(t, want.TotalCost, got.TotalCost, 0.0001)
+	want.TotalCost = got.TotalCost
+
 	assert.Equal(t, want, got)
 }
 
@@ -726,6 +831,41 @@ func TestPrintJSONSummaryWithCacheTokens(t *testing.T) {
 		CacheWriteTokens: 1500,
 		LLMDurationMs:    1000,
 		Models:           map[string]int{"claude-3-5-sonnet-20241022": 1},
+	})
+}
+
+func TestPrintJSONSummaryWithCost(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.CapturedCall{
+		IsLLM:        true,
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		InputTokens:  1000,
+		OutputTokens: 500,
+		Duration:     2 * time.Second,
+	})
+	stats.record(capture.CapturedCall{
+		IsLLM:        true,
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4",
+		InputTokens:  2000,
+		OutputTokens: 1000,
+		Duration:     3 * time.Second,
+	})
+
+	// gpt-4o:        1000 * $2.50/1M + 500 * $10.00/1M  = $0.0025 + $0.005  = $0.0075
+	// claude-sonnet-4: 2000 * $3.00/1M + 1000 * $15.00/1M = $0.006  + $0.015  = $0.021
+	// Total: $0.0285
+	checkPrintJSON(t, &stats, nil, jsonSummary{
+		Type:          "summary",
+		LLMCalls:      2,
+		InputTokens:   3000,
+		OutputTokens:  1500,
+		TotalCost:     0.0285,
+		LLMDurationMs: 5000,
+		Models:        map[string]int{"gpt-4o": 1, "claude-sonnet-4": 1},
 	})
 }
 

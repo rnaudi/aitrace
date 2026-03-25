@@ -18,6 +18,7 @@ Run any AI tool or agent and inspect:
 
 - LLM calls
 - tokens used
+- estimated cost
 - latency
 - tools invoked
 - overall behavior of the run
@@ -25,12 +26,12 @@ Run any AI tool or agent and inspect:
 
 ```sh
 aitrace run -- opencode "refactor the auth module"
-[aitrace] #1 gpt-4o | tok: 537 in / 19 out | 857ms
-[aitrace] #2 claude-opus-4.6 | tok: 19,620 in / 69 out | 3.8s | tools: glob !large
-[aitrace] #3 claude-opus-4.6 | tok: 8,441 in / 1,205 out | 12.4s | tools: read, edit, bash
-[aitrace] #4 claude-opus-4.6 | tok: 9,102 in / 87 out | 1.9s
+[aitrace] #1 gpt-4o | tok: 537 in / 19 out | 857ms | $0.002
+[aitrace] #2 claude-opus-4.6 | tok: 19,620 in / 69 out | 3.8s | $0.100 | tools: glob !large
+[aitrace] #3 claude-opus-4.6 | tok: 8,441 in / 1,205 out | 12.4s | $0.072 | tools: read, edit, bash
+[aitrace] #4 claude-opus-4.6 | tok: 9,102 in / 87 out | 1.9s | $0.048
 [aitrace] ---
-[aitrace] 4 calls | 37,700 in / 1,380 out | 18.9s
+[aitrace] 4 calls 37,700/1,380 tok $0.222 18.9s elapsed
 ```
 
 Works with OpenAI, Anthropic, and GitHub Copilot.
@@ -59,6 +60,7 @@ aitrace doctor                                   # check TLS connectivity
 | Zero-config              | yes     | no       | no       | no          | yes      |
 | Code changes needed      | no      | SDK      | base URL | SDK         | no       |
 | LLM-aware                | yes     | yes      | yes      | yes         | no       |
+| Cost tracking            | yes     | yes      | yes      | no          | no       |
 | Works on 3rd-party tools | yes     | no       | no       | no          | yes      |
 | OTel native              | yes     | yes      | no       | yes         | no       |
 | Data stays local         | yes     | self-host| no       | depends     | no       |

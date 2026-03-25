@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rnaudi/aitrace/internal/capture"
+	"github.com/rnaudi/aitrace/internal/cost"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -168,6 +169,15 @@ func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Cap
 		}
 		if call.ErrorMessage != "" {
 			attrs = append(attrs, attribute.String("aitrace.error.message", call.ErrorMessage))
+		}
+
+		// Per-call cost estimate. Only set when the model is in the pricing table.
+		if callCost := cost.Calculate(
+			call.Provider, call.EffectiveModel(),
+			call.InputTokens, call.OutputTokens,
+			call.CacheReadTokens, call.CacheWriteTokens,
+		); callCost > 0 {
+			attrs = append(attrs, attribute.Float64("aitrace.cost", callCost))
 		}
 	}
 

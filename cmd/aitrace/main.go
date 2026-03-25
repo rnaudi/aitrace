@@ -29,6 +29,7 @@ import (
 
 	"github.com/rnaudi/aitrace/internal/capture"
 	"github.com/rnaudi/aitrace/internal/cert"
+	"github.com/rnaudi/aitrace/internal/cost"
 	"github.com/rnaudi/aitrace/internal/envtags"
 	"github.com/rnaudi/aitrace/internal/run"
 	"github.com/rnaudi/aitrace/internal/trace"
@@ -333,6 +334,7 @@ type sessionStats struct {
 	outputTokens     int64
 	cacheReadTokens  int64
 	cacheWriteTokens int64
+	totalCost        float64 // accumulated USD cost across all LLM calls
 	llmDuration      time.Duration
 	models           map[string]int // model name -> call count
 	hosts            map[string]int // non-LLM host -> call count
@@ -348,6 +350,11 @@ func (s *sessionStats) record(c capture.CapturedCall) {
 		s.outputTokens += c.OutputTokens
 		s.cacheReadTokens += c.CacheReadTokens
 		s.cacheWriteTokens += c.CacheWriteTokens
+		s.totalCost += cost.Calculate(
+			c.Provider, c.EffectiveModel(),
+			c.InputTokens, c.OutputTokens,
+			c.CacheReadTokens, c.CacheWriteTokens,
+		)
 		s.llmDuration += c.Duration
 
 		if model := c.EffectiveModel(); model != "" {
@@ -384,6 +391,9 @@ func (s *sessionStats) print(w io.Writer, sessionStart time.Time, traceURL strin
 	line := fmt.Sprintf("[aitrace] %d calls", s.llmCalls)
 	if s.inputTokens > 0 || s.outputTokens > 0 {
 		line += fmt.Sprintf(" %d/%d tok", s.inputTokens, s.outputTokens)
+	}
+	if costStr := cost.FormatUSD(s.totalCost); costStr != "" {
+		line += " " + costStr
 	}
 	line += " " + elapsed.String() + " elapsed"
 	fmt.Fprintln(w, line)
@@ -430,9 +440,9 @@ const (
 
 // formatCallLine builds the one-line stderr summary for an LLM call.
 //
-// Normal: [aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1.2s
-// Tools:  [aitrace] #2 claude-opus-4.6 | tok: 19,659 in / 106 out | 3.8s | tools: skill,glob !large
-// Cache:  [aitrace] #3 claude-3-5-sonnet | tok: 2,000 in / 500 out | 1.2s !cache
+// Normal: [aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1.2s | $0.007
+// Tools:  [aitrace] #2 claude-opus-4.6 | tok: 19,659 in / 106 out | 3.8s | $0.100 | tools: skill,glob !large
+// Cache:  [aitrace] #3 claude-3-5-sonnet | tok: 2,000 in / 500 out | 1.2s | $0.009 !cache
 // Error:  [aitrace] #4 gpt-4o | 429 rate_limit_exceeded | 0.2s !error
 // Flags:  !cache (prompt caching active), !large (total tokens > 10k),
 //
@@ -458,6 +468,16 @@ func formatCallLine(c capture.CapturedCall) string {
 	}
 
 	line += " | " + c.Duration.Round(time.Millisecond).String()
+
+	// Cost — shown after duration when the model is in the pricing table.
+	callCost := cost.Calculate(
+		c.Provider, c.EffectiveModel(),
+		c.InputTokens, c.OutputTokens,
+		c.CacheReadTokens, c.CacheWriteTokens,
+	)
+	if costStr := cost.FormatUSD(callCost); costStr != "" {
+		line += " | " + costStr
+	}
 
 	if len(c.ToolCalls) > 0 {
 		line += " | tools: " + strings.Join(c.ToolCalls, ",")
@@ -536,8 +556,9 @@ type jsonCall struct {
 	ToolCallArgs []string `json:"tool_call_args,omitempty"`
 	ErrorMessage string   `json:"error_message,omitempty"`
 
-	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+	CacheReadTokens  int64   `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
+	Cost             float64 `json:"cost,omitempty"`
 }
 
 // formatCallJSON converts a CapturedCall to a single JSON line.
@@ -566,6 +587,11 @@ func formatCallJSON(c capture.CapturedCall) string {
 
 		CacheReadTokens:  c.CacheReadTokens,
 		CacheWriteTokens: c.CacheWriteTokens,
+		Cost: cost.Calculate(
+			c.Provider, c.EffectiveModel(),
+			c.InputTokens, c.OutputTokens,
+			c.CacheReadTokens, c.CacheWriteTokens,
+		),
 	}
 	b, _ := json.Marshal(jc)
 	return string(b)
@@ -581,6 +607,7 @@ type jsonSummary struct {
 	OutputTokens      int64             `json:"output_tokens"`
 	CacheReadTokens   int64             `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens  int64             `json:"cache_write_tokens,omitempty"`
+	TotalCost         float64           `json:"total_cost,omitempty"`
 	LLMDurationMs     int64             `json:"llm_duration_ms"`
 	SessionDurationMs int64             `json:"session_duration_ms"`
 	Models            map[string]int    `json:"models,omitempty"`
@@ -599,6 +626,7 @@ func (s *sessionStats) printJSON(w io.Writer, sessionStart time.Time, envs []env
 		OutputTokens:      s.outputTokens,
 		CacheReadTokens:   s.cacheReadTokens,
 		CacheWriteTokens:  s.cacheWriteTokens,
+		TotalCost:         s.totalCost,
 		LLMDurationMs:     s.llmDuration.Milliseconds(),
 		SessionDurationMs: time.Since(sessionStart).Milliseconds(),
 		Models:            s.models,

@@ -57,6 +57,7 @@ func TestEmitSpanAttributes(t *testing.T) {
 		"aitrace.call.kind":              attribute.StringValue("llm"),
 		"aitrace.call.outcome":           attribute.StringValue("stop"),
 		"aitrace.call.sequence":          attribute.Int64Value(1),
+		"aitrace.cost":                   attribute.Float64Value(0.0001425),
 		"server.address":                 attribute.StringValue("api.openai.com"),
 		"http.request.method":            attribute.StringValue("POST"),
 		"http.response.status_code":      attribute.Int64Value(200),
