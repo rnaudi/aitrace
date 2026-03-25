@@ -457,8 +457,8 @@ func formatCountsDesc(m map[string]int) string {
 
 // Flag thresholds for the human-readable call line.
 const (
-	largeTokThreshold     = 10_000
-	longDurationThreshold = 10 * time.Second
+	largeTokThreshold     = 50_000
+	longDurationThreshold = 30 * time.Second
 )
 
 // formatCallLine builds the one-line stderr summary for an LLM call.
@@ -467,9 +467,9 @@ const (
 // Tools:  [aitrace] #2 claude-opus-4.6 | tok: 19,659 in / 106 out | 3.8s | $0.100 | tools: skill,glob !large
 // Cache:  [aitrace] #3 claude-3-5-sonnet | tok: 2,000 in / 500 out | 1.2s | $0.009 !cache
 // Error:  [aitrace] #4 gpt-4o | 429 rate_limit_exceeded | 0.2s !error
-// Flags:  !cache (prompt caching active), !large (total tokens > 10k),
+// Flags:  !cache (prompt caching active), !large (total tokens > 50k),
 //
-//	!long (duration > 10s), !error (status >= 400)
+//	!long (duration > 30s), !error (status >= 400)
 func formatCallLine(c capture.Call) string {
 	model := c.EffectiveModel()
 	if model == "" {

@@ -319,7 +319,7 @@ func TestFormatCallLineLLMWithToolCalls(t *testing.T) {
 		InputTokens:  10568,
 		OutputTokens: 268,
 		Duration:     4500 * time.Millisecond,
-	}, "[aitrace] #1 claude-opus-4.6 | tok: 10,568 in / 268 out | 4.5s | tools: read_file,grep !large")
+	}, "[aitrace] #1 claude-opus-4.6 | tok: 10,568 in / 268 out | 4.5s | tools: read_file,grep")
 }
 
 func TestFormatCallLineLLMWithError(t *testing.T) {
@@ -379,10 +379,10 @@ func TestFormatCallLineLargeFlag(t *testing.T) {
 		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   200,
-		InputTokens:  9000,
-		OutputTokens: 1500,
+		InputTokens:  45000,
+		OutputTokens: 6000,
 		Duration:     3 * time.Second,
-	}, "[aitrace] #1 claude-opus-4.6 | tok: 9,000 in / 1,500 out | 3s !large")
+	}, "[aitrace] #1 claude-opus-4.6 | tok: 45,000 in / 6,000 out | 3s !large")
 }
 
 func TestFormatCallLineLongFlag(t *testing.T) {
@@ -394,8 +394,8 @@ func TestFormatCallLineLongFlag(t *testing.T) {
 		StatusCode:   200,
 		InputTokens:  500,
 		OutputTokens: 100,
-		Duration:     15 * time.Second,
-	}, "[aitrace] #1 gpt-4o | tok: 500 in / 100 out | 15s !long")
+		Duration:     35 * time.Second,
+	}, "[aitrace] #1 gpt-4o | tok: 500 in / 100 out | 35s !long")
 }
 
 func TestFormatCallLineLargeAndLongFlags(t *testing.T) {
@@ -405,11 +405,11 @@ func TestFormatCallLineLargeAndLongFlags(t *testing.T) {
 		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   200,
-		InputTokens:  45000,
-		OutputTokens: 2500,
-		Duration:     25 * time.Second,
+		InputTokens:  48000,
+		OutputTokens: 3000,
+		Duration:     35 * time.Second,
 		ToolCalls:    []string{"read_file", "grep"},
-	}, "[aitrace] #2 claude-opus-4.6 | tok: 45,000 in / 2,500 out | 25s | tools: read_file,grep !large !long")
+	}, "[aitrace] #2 claude-opus-4.6 | tok: 48,000 in / 3,000 out | 35s | tools: read_file,grep !large !long")
 }
 
 func TestFormatCallLineNoFlags(t *testing.T) {
@@ -476,11 +476,11 @@ func TestFormatCallLineCacheAndLargeFlags(t *testing.T) {
 		Kind:            capture.KindLLM,
 		Model:           "claude-3-5-sonnet-20241022",
 		StatusCode:      200,
-		InputTokens:     12000,
-		OutputTokens:    1000,
-		CacheReadTokens: 10000,
+		InputTokens:     48000,
+		OutputTokens:    3000,
+		CacheReadTokens: 40000,
 		Duration:        3 * time.Second,
-	}, "[aitrace] #1 claude-3-5-sonnet-20241022 | tok: 12,000 in / 1,000 out | 3s !cache !large")
+	}, "[aitrace] #1 claude-3-5-sonnet-20241022 | tok: 48,000 in / 3,000 out | 3s !cache !large")
 }
 
 func TestFormatCallLineErrorNoMessage(t *testing.T) {
@@ -524,7 +524,7 @@ func TestFormatCallLineWithCostAndTools(t *testing.T) {
 		OutputTokens: 268,
 		ToolCalls:    []string{"read_file", "grep"},
 		Duration:     4500 * time.Millisecond,
-	}, "[aitrace] #2 claude-3-5-sonnet-20241022 | tok: 10,568 in / 268 out | 4.5s | $0.036 | tools: read_file,grep !large")
+	}, "[aitrace] #2 claude-3-5-sonnet-20241022 | tok: 10,568 in / 268 out | 4.5s | $0.036 | tools: read_file,grep")
 }
 
 func TestFormatCallLineErrorNoCost(t *testing.T) {
