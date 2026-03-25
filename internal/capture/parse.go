@@ -12,8 +12,8 @@ import (
 	"strings"
 )
 
-// Adding a provider requires updating InferProvider(), DefaultLLMHosts,
-// DefaultLLMWildcards (if subdomains) in proxy.go, and proxy_test.go
+// Adding a provider requires updating InferProvider(), DefaultLLMHosts(),
+// DefaultLLMWildcards() (if subdomains) in proxy.go, and proxy_test.go
 // host allowlist tests.
 const (
 	ProviderOpenAI        = "openai"
