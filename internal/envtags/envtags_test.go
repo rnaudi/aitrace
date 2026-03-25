@@ -7,20 +7,38 @@ import (
 	"pgregory.net/rapid"
 )
 
-// noIMDS is a no-op IMDS probe that skips the 1-second network timeout.
-func noIMDS() (Env, bool) { return Env{}, false }
+// noProbe is a no-op probe that skips DMI sysfs reads and IMDS network calls.
+func noProbe() (Env, bool) { return Env{}, false }
 
-// checkDetect sets the given env vars, runs detect() with no IMDS probe,
-// and asserts the result matches want.
+// sentinelEnvVars lists every env var read by detect functions.
+// checkDetect clears them all before setting test-specific values so that
+// the host environment (e.g. GitHub Actions runner) doesn't leak through.
+var sentinelEnvVars = []string{
+	"GITHUB_ACTIONS", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_WORKFLOW",
+	"GITLAB_CI", "CI_PROJECT_PATH", "CI_PIPELINE_ID",
+	"CIRCLECI", "CIRCLE_PROJECT_REPONAME", "CIRCLE_BUILD_NUM",
+	"JENKINS_URL", "BUILD_NUMBER",
+	"BUILDKITE", "BUILDKITE_PIPELINE_SLUG", "BUILDKITE_BUILD_NUMBER",
+	"TRAVIS", "TRAVIS_REPO_SLUG", "TRAVIS_BUILD_NUMBER",
+	"FLY_MACHINE_ID", "FLY_REGION",
+	"RAILWAY_ENVIRONMENT", "RAILWAY_SERVICE_NAME",
+	"KUBERNETES_SERVICE_HOST",
+}
+
+// checkDetect clears all sentinel env vars, sets the given env vars,
+// runs detect() with no DMI/IMDS probes, and asserts the result matches want.
 //
 // Why not t.Parallel: t.Setenv is incompatible with parallel subtests
 // because it mutates process-global state.
 func checkDetect(t *testing.T, envVars map[string]string, want []Env) {
 	t.Helper()
+	for _, k := range sentinelEnvVars {
+		t.Setenv(k, "")
+	}
 	for k, v := range envVars {
 		t.Setenv(k, v)
 	}
-	got := detect(noIMDS)
+	got := detect(noProbe, noProbe)
 	assert.Equal(t, want, got)
 }
 
@@ -196,11 +214,14 @@ func TestDetectCIPropertyGitHubActions(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		repo := rapid.StringMatching(`[a-z]+/[a-z]+`).Draw(rt, "repo")
 		runID := rapid.StringMatching(`[0-9]{1,10}`).Draw(rt, "runID")
+		for _, k := range sentinelEnvVars {
+			t.Setenv(k, "")
+		}
 		t.Setenv("GITHUB_ACTIONS", "true")
 		t.Setenv("GITHUB_REPOSITORY", repo)
 		t.Setenv("GITHUB_RUN_ID", runID)
 
-		envs := detect(noIMDS)
+		envs := detect(noProbe, noProbe)
 
 		if assert.Len(rt, envs, 1) {
 			assert.Equal(rt, GithubActions, envs[0].Kind)

@@ -83,12 +83,13 @@ type Env struct {
 // It reads env vars, sysfs files, and the IMDS endpoint (with a 1-second
 // timeout). Safe to call from any platform.
 func Detect() []Env {
-	return detect(detectCloudIMDS)
+	return detect(detectCloudDMI, detectCloudIMDS)
 }
 
-// detect is the internal implementation of Detect. The imdsProbe parameter
-// allows tests to skip the 1-second IMDS timeout by injecting a no-op.
-func detect(imdsProbe func() (Env, bool)) []Env {
+// detect is the internal implementation of Detect. The probe parameters
+// allow tests to skip the sysfs reads and 1-second IMDS timeout by
+// injecting no-ops.
+func detect(dmiProbe, imdsProbe func() (Env, bool)) []Env {
 	var envs []Env
 
 	if e, ok := detectGithubActions(); ok {
@@ -109,7 +110,7 @@ func detect(imdsProbe func() (Env, bool)) []Env {
 		envs = append(envs, e)
 	} else if e, ok := detectRailway(); ok {
 		envs = append(envs, e)
-	} else if e, ok := detectCloudDMI(); ok {
+	} else if e, ok := dmiProbe(); ok {
 		envs = append(envs, e)
 	} else if e, ok := imdsProbe(); ok {
 		envs = append(envs, e)
