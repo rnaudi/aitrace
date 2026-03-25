@@ -29,10 +29,12 @@ import (
 
 	"github.com/rnaudi/aitrace/internal/capture"
 	"github.com/rnaudi/aitrace/internal/cert"
+	"github.com/rnaudi/aitrace/internal/envtags"
 	"github.com/rnaudi/aitrace/internal/run"
 	"github.com/rnaudi/aitrace/internal/trace"
 
 	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 const usage = `Usage:
@@ -99,17 +101,19 @@ func runCmd(args []string) {
 		os.Exit(1)
 	}
 
+	envs := envtags.Detect()
+
 	if *otelFlag {
-		runOTel(childArgs[0], childArgs[1:], *jsonFlag)
+		runOTel(childArgs[0], childArgs[1:], *jsonFlag, envs)
 	} else {
-		runTerminal(childArgs[0], childArgs[1:], *jsonFlag)
+		runTerminal(childArgs[0], childArgs[1:], *jsonFlag, envs)
 	}
 }
 
 // runTerminal runs the child process and prints call summaries to stderr.
 // No OpenTelemetry, no external dependencies — standalone terminal output.
 // When jsonOutput is true, JSONL replaces human-readable output.
-func runTerminal(cmd string, args []string, jsonOutput bool) {
+func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	sessionStart := time.Now()
 	var stats sessionStats
 	p, err := capture.NewProxy(capture.ProxyOptions{
@@ -148,6 +152,10 @@ func runTerminal(cmd string, args []string, jsonOutput bool) {
 
 	fmt.Fprintf(os.Stderr, "[aitrace] listening on %s\n", p.Addr())
 
+	if line := envSummary(envs); line != "" {
+		fmt.Fprintf(os.Stderr, "[aitrace] environment: %s\n", line)
+	}
+
 	if os.Getenv("SSH_CONNECTION") != "" {
 		fmt.Fprintf(os.Stderr, "[aitrace] SSH session detected\n")
 	}
@@ -182,7 +190,7 @@ func runTerminal(cmd string, args []string, jsonOutput bool) {
 	p.Wait()
 
 	if jsonOutput {
-		stats.printJSON(os.Stderr, sessionStart)
+		stats.printJSON(os.Stderr, sessionStart, envs)
 	} else {
 		stats.print(os.Stderr, sessionStart, "")
 	}
@@ -192,10 +200,11 @@ func runTerminal(cmd string, args []string, jsonOutput bool) {
 // runOTel runs the child process, prints call summaries to stderr, and
 // emits OpenTelemetry spans to an OTLP collector (default localhost:4317).
 // When jsonOutput is true, JSONL replaces human-readable output.
-func runOTel(cmd string, args []string, jsonOutput bool) {
+func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	ctx := context.Background()
 	tp, err := trace.NewTracerProvider(ctx, trace.TracerOptions{
-		ServiceName: filepath.Base(cmd),
+		ServiceName:   filepath.Base(cmd),
+		ResourceAttrs: envResourceAttrs(envs),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] create tracer provider: %v\n", err)
@@ -249,6 +258,10 @@ func runOTel(cmd string, args []string, jsonOutput bool) {
 	}
 
 	fmt.Fprintf(os.Stderr, "[aitrace] listening on %s\n", p.Addr())
+
+	if line := envSummary(envs); line != "" {
+		fmt.Fprintf(os.Stderr, "[aitrace] environment: %s\n", line)
+	}
 
 	if os.Getenv("SSH_CONNECTION") != "" {
 		fmt.Fprintf(os.Stderr, "[aitrace] SSH session detected\n")
@@ -304,7 +317,7 @@ func runOTel(cmd string, args []string, jsonOutput bool) {
 
 	traceID := sessionSpan.SpanContext().TraceID()
 	if jsonOutput {
-		stats.printJSON(os.Stderr, sessionStart)
+		stats.printJSON(os.Stderr, sessionStart, envs)
 	} else {
 		stats.print(os.Stderr, sessionStart, "http://localhost:16686/trace/"+traceID.String())
 	}
@@ -561,19 +574,20 @@ func formatCallJSON(c capture.CapturedCall) string {
 // jsonSummary is the session summary JSONL object, emitted once after
 // the child exits.
 type jsonSummary struct {
-	Type              string         `json:"type"`
-	LLMCalls          int            `json:"llm_calls"`
-	HTTPCalls         int            `json:"http_calls"`
-	InputTokens       int64          `json:"input_tokens"`
-	OutputTokens      int64          `json:"output_tokens"`
-	CacheReadTokens   int64          `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens  int64          `json:"cache_write_tokens,omitempty"`
-	LLMDurationMs     int64          `json:"llm_duration_ms"`
-	SessionDurationMs int64          `json:"session_duration_ms"`
-	Models            map[string]int `json:"models,omitempty"`
+	Type              string            `json:"type"`
+	LLMCalls          int               `json:"llm_calls"`
+	HTTPCalls         int               `json:"http_calls"`
+	InputTokens       int64             `json:"input_tokens"`
+	OutputTokens      int64             `json:"output_tokens"`
+	CacheReadTokens   int64             `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens  int64             `json:"cache_write_tokens,omitempty"`
+	LLMDurationMs     int64             `json:"llm_duration_ms"`
+	SessionDurationMs int64             `json:"session_duration_ms"`
+	Models            map[string]int    `json:"models,omitempty"`
+	Environment       map[string]string `json:"environment,omitempty"`
 }
 
-func (s *sessionStats) printJSON(w io.Writer, sessionStart time.Time) {
+func (s *sessionStats) printJSON(w io.Writer, sessionStart time.Time, envs []envtags.Env) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -588,9 +602,62 @@ func (s *sessionStats) printJSON(w io.Writer, sessionStart time.Time) {
 		LLMDurationMs:     s.llmDuration.Milliseconds(),
 		SessionDurationMs: time.Since(sessionStart).Milliseconds(),
 		Models:            s.models,
+		Environment:       envJSONTags(envs),
 	}
 	b, _ := json.Marshal(js)
 	fmt.Fprintln(w, string(b))
+}
+
+// envSummary returns a short comma-separated label string for terminal
+// output, or "" if no environments were detected.
+func envSummary(envs []envtags.Env) string {
+	if len(envs) == 0 {
+		return ""
+	}
+	labels := make([]string, len(envs))
+	for i, e := range envs {
+		labels[i] = e.Kind.String()
+	}
+	return strings.Join(labels, ", ")
+}
+
+// envJSONTags flattens detected environments into a single map for JSONL
+// output. Returns nil when nothing was detected.
+func envJSONTags(envs []envtags.Env) map[string]string {
+	if len(envs) == 0 {
+		return nil
+	}
+	m := make(map[string]string)
+	for _, e := range envs {
+		m[e.Kind.String()] = ""
+		for k, v := range e.Tags {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// envResourceAttrs converts detected environments to OTel resource
+// attributes using semantic conventions where available.
+func envResourceAttrs(envs []envtags.Env) []attribute.KeyValue {
+	var attrs []attribute.KeyValue
+	for _, e := range envs {
+		switch e.Kind {
+		case envtags.GithubActions, envtags.GitLabCI, envtags.CircleCI,
+			envtags.Jenkins, envtags.Buildkite, envtags.TravisCI:
+			attrs = append(attrs, attribute.String("aitrace.ci.system", e.Kind.String()))
+			attrs = append(attrs, semconv.DeploymentEnvironment("ci"))
+		case envtags.Kubernetes:
+			attrs = append(attrs, attribute.Bool("aitrace.kubernetes", true))
+		default:
+			// Cloud providers: AWS, GCP, Azure, Fly, Railway.
+			attrs = append(attrs, semconv.CloudProviderKey.String(e.Kind.String()))
+		}
+		for k, v := range e.Tags {
+			attrs = append(attrs, attribute.String("aitrace."+k, v))
+		}
+	}
+	return attrs
 }
 
 func version() string {

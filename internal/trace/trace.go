@@ -31,6 +31,9 @@ type TracerOptions struct {
 	// ServiceName sets the OTel service.name resource attribute.
 	// Defaults to "aitrace".
 	ServiceName string
+	// ResourceAttrs are additional resource attributes merged into the
+	// TracerProvider. Populated from detected environment metadata in main.go.
+	ResourceAttrs []attribute.KeyValue
 }
 
 // NewTracerProvider creates an OTel TracerProvider that exports spans
@@ -54,10 +57,13 @@ func NewTracerProvider(ctx context.Context, opts TracerOptions) (*sdktrace.Trace
 		return nil, fmt.Errorf("create otlp exporter: %w", err)
 	}
 
+	baseAttrs := []attribute.KeyValue{
+		semconv.ServiceNameKey.String(serviceName),
+	}
+	baseAttrs = append(baseAttrs, opts.ResourceAttrs...)
+
 	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			semconv.ServiceNameKey.String(serviceName),
-		),
+		resource.WithAttributes(baseAttrs...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create resource: %w", err)

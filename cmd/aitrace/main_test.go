@@ -11,8 +11,11 @@ import (
 	"time"
 
 	"github.com/rnaudi/aitrace/internal/capture"
+	"github.com/rnaudi/aitrace/internal/envtags"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 func TestSessionStatsRecordLLM(t *testing.T) {
@@ -635,6 +638,24 @@ func TestFormatCallJSONIsValidJSON(t *testing.T) {
 	assert.True(t, json.Valid([]byte(line)), "formatCallJSON should produce valid JSON")
 }
 
+// checkPrintJSON calls printJSON on stats and asserts the result matches want.
+// SessionDurationMs is non-deterministic, so it's verified as >= 0 then zeroed
+// before the whole-value comparison.
+func checkPrintJSON(t *testing.T, stats *sessionStats, envs []envtags.Env, want jsonSummary) {
+	t.Helper()
+	var buf bytes.Buffer
+	stats.printJSON(&buf, time.Now(), envs)
+
+	var got jsonSummary
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("printJSON produced invalid JSON: %v\nline: %s", err, buf.String())
+	}
+
+	assert.GreaterOrEqual(t, got.SessionDurationMs, int64(0))
+	got.SessionDurationMs = 0
+	assert.Equal(t, want, got)
+}
+
 func TestPrintJSONSummary(t *testing.T) {
 	t.Parallel()
 
@@ -662,50 +683,24 @@ func TestPrintJSONSummary(t *testing.T) {
 	})
 	stats.record(capture.CapturedCall{IsLLM: false, Host: "github.com"})
 
-	// Use a fixed sessionStart so session_duration_ms is predictable.
-	// printJSON calls time.Since(sessionStart) so we can't assert the exact value,
-	// but we can verify the structure and static fields.
-	sessionStart := time.Now()
-
-	var buf bytes.Buffer
-	stats.printJSON(&buf, sessionStart)
-
-	var got jsonSummary
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("printJSON produced invalid JSON: %v\nline: %s", err, buf.String())
-	}
-
-	assert.Equal(t, "summary", got.Type)
-	assert.Equal(t, 3, got.LLMCalls)
-	assert.Equal(t, 1, got.HTTPCalls)
-	assert.Equal(t, int64(800), got.InputTokens)
-	assert.Equal(t, int64(350), got.OutputTokens)
-	assert.Equal(t, int64(9000), got.LLMDurationMs)
-	assert.Equal(t, map[string]int{"gpt-4o": 2, "claude-3-5-sonnet-20241022": 1}, got.Models)
-	// session_duration_ms is non-negative (can't assert exact value since it uses time.Since).
-	assert.GreaterOrEqual(t, got.SessionDurationMs, int64(0))
+	checkPrintJSON(t, &stats, nil, jsonSummary{
+		Type:          "summary",
+		LLMCalls:      3,
+		HTTPCalls:     1,
+		InputTokens:   800,
+		OutputTokens:  350,
+		LLMDurationMs: 9000,
+		Models:        map[string]int{"gpt-4o": 2, "claude-3-5-sonnet-20241022": 1},
+	})
 }
 
 func TestPrintJSONSummaryNoCalls(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	var buf bytes.Buffer
-	stats.printJSON(&buf, time.Now())
-
-	var got jsonSummary
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("printJSON produced invalid JSON: %v\nline: %s", err, buf.String())
-	}
-
-	assert.Equal(t, "summary", got.Type)
-	assert.Equal(t, 0, got.LLMCalls)
-	assert.Equal(t, 0, got.HTTPCalls)
-	assert.Equal(t, int64(0), got.InputTokens)
-	assert.Equal(t, int64(0), got.OutputTokens)
-	assert.Equal(t, int64(0), got.CacheReadTokens)
-	assert.Equal(t, int64(0), got.CacheWriteTokens)
-	assert.Nil(t, got.Models)
+	checkPrintJSON(t, &stats, nil, jsonSummary{
+		Type: "summary",
+	})
 }
 
 func TestPrintJSONSummaryWithCacheTokens(t *testing.T) {
@@ -722,19 +717,180 @@ func TestPrintJSONSummaryWithCacheTokens(t *testing.T) {
 		Duration:         1 * time.Second,
 	})
 
-	var buf bytes.Buffer
-	stats.printJSON(&buf, time.Now())
+	checkPrintJSON(t, &stats, nil, jsonSummary{
+		Type:             "summary",
+		LLMCalls:         1,
+		InputTokens:      2000,
+		OutputTokens:     500,
+		CacheReadTokens:  800,
+		CacheWriteTokens: 1500,
+		LLMDurationMs:    1000,
+		Models:           map[string]int{"claude-3-5-sonnet-20241022": 1},
+	})
+}
 
-	var got jsonSummary
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("printJSON produced invalid JSON: %v\nline: %s", err, buf.String())
+func TestPrintJSONSummaryWithEnvironmentTags(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.CapturedCall{
+		IsLLM:    true,
+		Model:    "gpt-4o",
+		Duration: 1 * time.Second,
+	})
+
+	envs := []envtags.Env{
+		{
+			Kind: envtags.GithubActions,
+			Tags: map[string]string{
+				"ci.repository": "rnaudi/aitrace",
+			},
+		},
+		{Kind: envtags.GCP},
 	}
 
-	assert.Equal(t, "summary", got.Type)
-	assert.Equal(t, int64(2000), got.InputTokens)
-	assert.Equal(t, int64(500), got.OutputTokens)
-	assert.Equal(t, int64(800), got.CacheReadTokens)
-	assert.Equal(t, int64(1500), got.CacheWriteTokens)
+	checkPrintJSON(t, &stats, envs, jsonSummary{
+		Type:          "summary",
+		LLMCalls:      1,
+		LLMDurationMs: 1000,
+		Models:        map[string]int{"gpt-4o": 1},
+		Environment: map[string]string{
+			"github-actions": "",
+			"ci.repository":  "rnaudi/aitrace",
+			"gcp":            "",
+		},
+	})
+}
+
+// --- envSummary tests ---
+
+func checkEnvSummary(t *testing.T, envs []envtags.Env, want string) {
+	t.Helper()
+	got := envSummary(envs)
+	assert.Equal(t, want, got)
+}
+
+func TestEnvSummaryEmpty(t *testing.T) {
+	t.Parallel()
+	checkEnvSummary(t, nil, "")
+}
+
+func TestEnvSummarySingleCI(t *testing.T) {
+	t.Parallel()
+	checkEnvSummary(t, []envtags.Env{
+		{Kind: envtags.GithubActions},
+	}, "github-actions")
+}
+
+func TestEnvSummaryMultiple(t *testing.T) {
+	t.Parallel()
+	checkEnvSummary(t, []envtags.Env{
+		{Kind: envtags.GithubActions, Tags: map[string]string{"ci.repository": "foo/bar"}},
+		{Kind: envtags.AWS},
+		{Kind: envtags.Kubernetes},
+	}, "github-actions, aws, k8s")
+}
+
+// --- envJSONTags tests ---
+
+func checkEnvJSONTags(t *testing.T, envs []envtags.Env, want map[string]string) {
+	t.Helper()
+	got := envJSONTags(envs)
+	assert.Equal(t, want, got)
+}
+
+func TestEnvJSONTagsEmpty(t *testing.T) {
+	t.Parallel()
+	checkEnvJSONTags(t, nil, nil)
+}
+
+func TestEnvJSONTagsSingleNoTags(t *testing.T) {
+	t.Parallel()
+	checkEnvJSONTags(t, []envtags.Env{
+		{Kind: envtags.GCP},
+	}, map[string]string{
+		"gcp": "",
+	})
+}
+
+func TestEnvJSONTagsMultipleWithTags(t *testing.T) {
+	t.Parallel()
+	checkEnvJSONTags(t, []envtags.Env{
+		{Kind: envtags.GithubActions, Tags: map[string]string{
+			"ci.repository": "rnaudi/aitrace",
+			"ci.run_id":     "12345",
+		}},
+		{Kind: envtags.AWS, Tags: map[string]string{
+			"cloud.region": "us-east-1",
+		}},
+	}, map[string]string{
+		"github-actions": "",
+		"ci.repository":  "rnaudi/aitrace",
+		"ci.run_id":      "12345",
+		"aws":            "",
+		"cloud.region":   "us-east-1",
+	})
+}
+
+// --- envResourceAttrs tests ---
+
+func checkEnvResourceAttrs(t *testing.T, envs []envtags.Env, want []attribute.KeyValue) {
+	t.Helper()
+	got := envResourceAttrs(envs)
+	assert.Equal(t, want, got)
+}
+
+func TestEnvResourceAttrsEmpty(t *testing.T) {
+	t.Parallel()
+	checkEnvResourceAttrs(t, nil, nil)
+}
+
+func TestEnvResourceAttrsCI(t *testing.T) {
+	t.Parallel()
+	checkEnvResourceAttrs(t, []envtags.Env{
+		{Kind: envtags.GithubActions, Tags: map[string]string{
+			"ci.repository": "rnaudi/aitrace",
+		}},
+	}, []attribute.KeyValue{
+		attribute.String("aitrace.ci.system", "github-actions"),
+		semconv.DeploymentEnvironment("ci"),
+		attribute.String("aitrace.ci.repository", "rnaudi/aitrace"),
+	})
+}
+
+func TestEnvResourceAttrsKubernetes(t *testing.T) {
+	t.Parallel()
+	checkEnvResourceAttrs(t, []envtags.Env{
+		{Kind: envtags.Kubernetes},
+	}, []attribute.KeyValue{
+		attribute.Bool("aitrace.kubernetes", true),
+	})
+}
+
+func TestEnvResourceAttrsCloud(t *testing.T) {
+	t.Parallel()
+	checkEnvResourceAttrs(t, []envtags.Env{
+		{Kind: envtags.AWS, Tags: map[string]string{
+			"cloud.region": "us-east-1",
+		}},
+	}, []attribute.KeyValue{
+		semconv.CloudProviderKey.String("aws"),
+		attribute.String("aitrace.cloud.region", "us-east-1"),
+	})
+}
+
+func TestEnvResourceAttrsMixed(t *testing.T) {
+	t.Parallel()
+	checkEnvResourceAttrs(t, []envtags.Env{
+		{Kind: envtags.GitLabCI},
+		{Kind: envtags.GCP},
+		{Kind: envtags.Kubernetes},
+	}, []attribute.KeyValue{
+		attribute.String("aitrace.ci.system", "gitlab-ci"),
+		semconv.DeploymentEnvironment("ci"),
+		semconv.CloudProviderKey.String("gcp"),
+		attribute.Bool("aitrace.kubernetes", true),
+	})
 }
 
 // --- doctor / probeHost tests ---
