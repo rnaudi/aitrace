@@ -22,8 +22,8 @@ func TestSessionStatsRecordLLM(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		InputTokens:  100,
 		OutputTokens: 50,
@@ -46,8 +46,8 @@ func TestSessionStatsRecordLLMWithCacheTokens(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:            true,
+	stats.record(capture.Call{
+		Kind:             capture.KindLLM,
 		Model:            "claude-3-5-sonnet-20241022",
 		InputTokens:      2000,
 		OutputTokens:     500,
@@ -55,8 +55,8 @@ func TestSessionStatsRecordLLMWithCacheTokens(t *testing.T) {
 		CacheWriteTokens: 1500,
 		Duration:         1 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:           true,
+	stats.record(capture.Call{
+		Kind:            capture.KindLLM,
 		Model:           "claude-3-5-sonnet-20241022",
 		InputTokens:     2000,
 		OutputTokens:    300,
@@ -77,9 +77,9 @@ func TestSessionStatsRecordHTTP(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM: false,
-		Host:  "github.com",
+	stats.record(capture.Call{
+		Kind: capture.KindHTTP,
+		Host: "github.com",
 	})
 
 	stats.mu.Lock()
@@ -93,30 +93,30 @@ func TestSessionStatsRecordMixed(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		InputTokens:  100,
 		OutputTokens: 50,
 		Duration:     1 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		InputTokens:  200,
 		OutputTokens: 100,
 		Duration:     2 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		InputTokens:  500,
 		OutputTokens: 200,
 		Duration:     3 * time.Second,
 	})
-	stats.record(capture.CapturedCall{IsLLM: false, Host: "github.com"})
-	stats.record(capture.CapturedCall{IsLLM: false, Host: "github.com"})
-	stats.record(capture.CapturedCall{IsLLM: false, Host: "models.dev"})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "github.com"})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "github.com"})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "models.dev"})
 
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
@@ -133,8 +133,8 @@ func TestSessionStatsRecordLLMFallsBackToRequestModel(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
 	})
 
@@ -147,7 +147,7 @@ func TestSessionStatsRecordLLMNoModel(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{IsLLM: true})
+	stats.record(capture.Call{Kind: capture.KindLLM})
 
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
@@ -159,7 +159,7 @@ func TestSessionStatsRecordHTTPEmptyHost(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{IsLLM: false, Host: ""})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: ""})
 
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
@@ -171,16 +171,16 @@ func TestSessionStatsRecordAccumulatesCost(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Provider:     "openai",
 		Model:        "gpt-4o",
 		InputTokens:  1000,
 		OutputTokens: 500,
 		Duration:     1 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Provider:     "anthropic",
 		Model:        "claude-sonnet-4",
 		InputTokens:  2000,
@@ -199,8 +199,8 @@ func TestSessionStatsRecordNoCostWithoutProvider(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		InputTokens:  1000,
 		OutputTokens: 500,
@@ -220,6 +220,63 @@ func TestSessionStatsPrintNoCalls(t *testing.T) {
 	var buf bytes.Buffer
 	stats.print(&buf, time.Now(), "")
 	assert.Equal(t, "[aitrace] no calls captured\n", buf.String())
+}
+
+func TestSessionStatsPrintLLMOnly(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
+		Model:        "gpt-4o",
+		InputTokens:  100,
+		OutputTokens: 50,
+		Duration:     2 * time.Second,
+	})
+
+	var buf bytes.Buffer
+	stats.print(&buf, time.Now(), "")
+	assert.Contains(t, buf.String(), "1 calls")
+	assert.NotContains(t, buf.String(), "LLM")
+	assert.NotContains(t, buf.String(), "HTTP")
+}
+
+func TestSessionStatsPrintHTTPOnly(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "github.com"})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "github.com"})
+
+	var buf bytes.Buffer
+	stats.print(&buf, time.Now(), "")
+	assert.Contains(t, buf.String(), "2 HTTP calls")
+	assert.NotContains(t, buf.String(), "LLM")
+}
+
+func TestSessionStatsPrintMixed(t *testing.T) {
+	t.Parallel()
+
+	var stats sessionStats
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
+		Model:        "gpt-4o",
+		InputTokens:  100,
+		OutputTokens: 50,
+		Duration:     1 * time.Second,
+	})
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
+		Model:        "gpt-4o",
+		InputTokens:  200,
+		OutputTokens: 100,
+		Duration:     2 * time.Second,
+	})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "github.com"})
+
+	var buf bytes.Buffer
+	stats.print(&buf, time.Now(), "")
+	assert.Contains(t, buf.String(), "2 LLM + 1 HTTP calls")
 }
 
 func TestFormatCountsDesc(t *testing.T) {
@@ -244,7 +301,7 @@ func TestFormatCountsDescEmpty(t *testing.T) {
 	assert.Equal(t, "", formatCountsDesc(nil))
 }
 
-func checkFormatCallLine(t *testing.T, c capture.CapturedCall, want string) {
+func checkFormatCallLine(t *testing.T, c capture.Call, want string) {
 	t.Helper()
 	got := formatCallLine(c)
 	assert.Equal(t, want, got)
@@ -252,9 +309,9 @@ func checkFormatCallLine(t *testing.T, c capture.CapturedCall, want string) {
 
 func TestFormatCallLineLLMWithToolCalls(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   200,
 		FinishReason: "tool_calls",
@@ -267,9 +324,9 @@ func TestFormatCallLineLLMWithToolCalls(t *testing.T) {
 
 func TestFormatCallLineLLMWithError(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     4,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   429,
 		ErrorMessage: "rate_limit_exceeded",
@@ -279,9 +336,9 @@ func TestFormatCallLineLLMWithError(t *testing.T) {
 
 func TestFormatCallLineLLMWithStop(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     2,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		StatusCode:   200,
 		FinishReason: "stop",
@@ -293,9 +350,9 @@ func TestFormatCallLineLLMWithStop(t *testing.T) {
 
 func TestFormatCallLineLLMNoTokens(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:   3,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		Model:      "gpt-4o",
 		StatusCode: 200,
 		Duration:   800 * time.Millisecond,
@@ -304,9 +361,9 @@ func TestFormatCallLineLLMNoTokens(t *testing.T) {
 
 func TestFormatCallLineLLMNoModel(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		StatusCode:   200,
 		FinishReason: "stop",
 		InputTokens:  500,
@@ -317,9 +374,9 @@ func TestFormatCallLineLLMNoModel(t *testing.T) {
 
 func TestFormatCallLineLargeFlag(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   200,
 		InputTokens:  9000,
@@ -330,9 +387,9 @@ func TestFormatCallLineLargeFlag(t *testing.T) {
 
 func TestFormatCallLineLongFlag(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		StatusCode:   200,
 		InputTokens:  500,
@@ -343,9 +400,9 @@ func TestFormatCallLineLongFlag(t *testing.T) {
 
 func TestFormatCallLineLargeAndLongFlags(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     2,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   200,
 		InputTokens:  45000,
@@ -357,9 +414,9 @@ func TestFormatCallLineLargeAndLongFlags(t *testing.T) {
 
 func TestFormatCallLineNoFlags(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		StatusCode:   200,
 		InputTokens:  500,
@@ -370,9 +427,9 @@ func TestFormatCallLineNoFlags(t *testing.T) {
 
 func TestFormatCallLineCacheFlag(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:        1,
-		IsLLM:           true,
+		Kind:            capture.KindLLM,
 		Model:           "claude-3-5-sonnet-20241022",
 		StatusCode:      200,
 		InputTokens:     2000,
@@ -385,9 +442,9 @@ func TestFormatCallLineCacheFlag(t *testing.T) {
 func TestFormatCallLineCacheWriteFlag(t *testing.T) {
 	t.Parallel()
 	// CacheWriteTokens alone should also trigger !cache.
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:         1,
-		IsLLM:            true,
+		Kind:             capture.KindLLM,
 		Model:            "claude-3-5-sonnet-20241022",
 		StatusCode:       200,
 		InputTokens:      2000,
@@ -400,9 +457,9 @@ func TestFormatCallLineCacheWriteFlag(t *testing.T) {
 func TestFormatCallLineNoCacheFlag(t *testing.T) {
 	t.Parallel()
 	// No cache tokens — no !cache flag.
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		StatusCode:   200,
 		InputTokens:  500,
@@ -414,9 +471,9 @@ func TestFormatCallLineNoCacheFlag(t *testing.T) {
 func TestFormatCallLineCacheAndLargeFlags(t *testing.T) {
 	t.Parallel()
 	// Both !cache and !large should appear.
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:        1,
-		IsLLM:           true,
+		Kind:            capture.KindLLM,
 		Model:           "claude-3-5-sonnet-20241022",
 		StatusCode:      200,
 		InputTokens:     12000,
@@ -428,9 +485,9 @@ func TestFormatCallLineCacheAndLargeFlags(t *testing.T) {
 
 func TestFormatCallLineErrorNoMessage(t *testing.T) {
 	t.Parallel()
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:   1,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		Model:      "gpt-4o",
 		StatusCode: 500,
 		Duration:   100 * time.Millisecond,
@@ -441,9 +498,9 @@ func TestFormatCallLineWithCost(t *testing.T) {
 	t.Parallel()
 	// Provider set → cost.Calculate returns a non-zero value → cost appears.
 	// gpt-4o: 500 * $2.50/1M + 100 * $10.00/1M = $0.00225
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     "openai",
 		Model:        "gpt-4o",
 		StatusCode:   200,
@@ -457,9 +514,9 @@ func TestFormatCallLineWithCostAndTools(t *testing.T) {
 	t.Parallel()
 	// Cost appears after duration, before tools.
 	// claude-3-5-sonnet: 10568 * $3.00/1M + 268 * $15.00/1M = 0.031704 + 0.00402 = 0.035724
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     2,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     "anthropic",
 		Model:        "claude-3-5-sonnet-20241022",
 		StatusCode:   200,
@@ -473,15 +530,76 @@ func TestFormatCallLineWithCostAndTools(t *testing.T) {
 func TestFormatCallLineErrorNoCost(t *testing.T) {
 	t.Parallel()
 	// Error calls with provider still shouldn't show cost (no tokens parsed).
-	checkFormatCallLine(t, capture.CapturedCall{
+	checkFormatCallLine(t, capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     "openai",
 		Model:        "gpt-4o",
 		StatusCode:   429,
 		ErrorMessage: "rate_limit_exceeded",
 		Duration:     200 * time.Millisecond,
 	}, "[aitrace] #1 gpt-4o | 429 rate_limit_exceeded | 200ms !error")
+}
+
+// --- HTTP call line tests ---
+
+func checkFormatHTTPCallLine(t *testing.T, c capture.Call, want string) {
+	t.Helper()
+	got := formatHTTPCallLine(c)
+	assert.Equal(t, want, got)
+}
+
+func TestFormatHTTPCallLineNormal(t *testing.T) {
+	t.Parallel()
+	checkFormatHTTPCallLine(t, capture.Call{
+		Sequence:   5,
+		Kind:       capture.KindHTTP,
+		Method:     "GET",
+		Host:       "github.com",
+		Path:       "/repos/foo/bar",
+		StatusCode: 200,
+		Duration:   340 * time.Millisecond,
+	}, "[aitrace] #5 GET github.com/repos/foo/bar | 200 | 340ms")
+}
+
+func TestFormatHTTPCallLineError(t *testing.T) {
+	t.Parallel()
+	checkFormatHTTPCallLine(t, capture.Call{
+		Sequence:   9,
+		Kind:       capture.KindHTTP,
+		Method:     "GET",
+		Host:       "api.example.com",
+		Path:       "/health",
+		StatusCode: 500,
+		Duration:   2100 * time.Millisecond,
+	}, "[aitrace] #9 GET api.example.com/health | 500 | 2.1s !error")
+}
+
+func TestFormatHTTPCallLinePOST(t *testing.T) {
+	t.Parallel()
+	checkFormatHTTPCallLine(t, capture.Call{
+		Sequence:   3,
+		Kind:       capture.KindHTTP,
+		Method:     "POST",
+		Host:       "api.stripe.com",
+		Path:       "/v1/charges",
+		StatusCode: 201,
+		Duration:   450 * time.Millisecond,
+	}, "[aitrace] #3 POST api.stripe.com/v1/charges | 201 | 450ms")
+}
+
+func TestFormatHTTPCallLineLong(t *testing.T) {
+	t.Parallel()
+	// Duration below longDurationThreshold — no !long flag for HTTP calls (only !error).
+	checkFormatHTTPCallLine(t, capture.Call{
+		Sequence:   1,
+		Kind:       capture.KindHTTP,
+		Method:     "GET",
+		Host:       "slow.example.com",
+		Path:       "/data",
+		StatusCode: 200,
+		Duration:   15 * time.Second,
+	}, "[aitrace] #1 GET slow.example.com/data | 200 | 15s")
 }
 
 func TestFormatTokenCount(t *testing.T) {
@@ -503,7 +621,7 @@ func TestFormatTokenCount(t *testing.T) {
 // checkFormatCallJSON verifies that formatCallJSON produces valid JSON that
 // round-trips through jsonCall and matches the expected struct.
 // Cost uses InDelta for floating-point precision.
-func checkFormatCallJSON(t *testing.T, c capture.CapturedCall, want jsonCall) {
+func checkFormatCallJSON(t *testing.T, c capture.Call, want jsonCall) {
 	t.Helper()
 	line := formatCallJSON(c)
 
@@ -523,7 +641,7 @@ func TestFormatCallJSONLLMCall(t *testing.T) {
 	start := time.Date(2026, 3, 24, 12, 0, 0, 0, time.UTC)
 	end := start.Add(1432 * time.Millisecond)
 
-	checkFormatCallJSON(t, capture.CapturedCall{
+	checkFormatCallJSON(t, capture.Call{
 		Sequence:     1,
 		Method:       "POST",
 		Host:         "api.openai.com",
@@ -532,7 +650,7 @@ func TestFormatCallJSONLLMCall(t *testing.T) {
 		Duration:     1432 * time.Millisecond,
 		StartTime:    start,
 		EndTime:      end,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     "openai",
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o-2024-05-13",
@@ -541,7 +659,7 @@ func TestFormatCallJSONLLMCall(t *testing.T) {
 		OutputTokens: 512,
 		FinishReason: "stop",
 	}, jsonCall{
-		Type:         "call",
+		Kind:         "llm",
 		Sequence:     1,
 		Method:       "POST",
 		Host:         "api.openai.com",
@@ -550,7 +668,6 @@ func TestFormatCallJSONLLMCall(t *testing.T) {
 		DurationMs:   1432,
 		StartTime:    "2026-03-24T12:00:00Z",
 		EndTime:      "2026-03-24T12:00:01.432Z",
-		IsLLM:        true,
 		Provider:     "openai",
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o-2024-05-13",
@@ -567,7 +684,7 @@ func TestFormatCallJSONNonLLMCall(t *testing.T) {
 	start := time.Date(2026, 3, 24, 12, 0, 2, 0, time.UTC)
 	end := start.Add(800 * time.Millisecond)
 
-	checkFormatCallJSON(t, capture.CapturedCall{
+	checkFormatCallJSON(t, capture.Call{
 		Sequence:   3,
 		Method:     "GET",
 		Host:       "github.com",
@@ -576,9 +693,9 @@ func TestFormatCallJSONNonLLMCall(t *testing.T) {
 		Duration:   800 * time.Millisecond,
 		StartTime:  start,
 		EndTime:    end,
-		IsLLM:      false,
+		Kind:       capture.KindHTTP,
 	}, jsonCall{
-		Type:       "call",
+		Kind:       "http",
 		Sequence:   3,
 		Method:     "GET",
 		Host:       "github.com",
@@ -595,7 +712,7 @@ func TestFormatCallJSONErrorCall(t *testing.T) {
 	start := time.Date(2026, 3, 24, 12, 0, 5, 0, time.UTC)
 	end := start.Add(200 * time.Millisecond)
 
-	checkFormatCallJSON(t, capture.CapturedCall{
+	checkFormatCallJSON(t, capture.Call{
 		Sequence:     4,
 		Method:       "POST",
 		Host:         "api.openai.com",
@@ -604,12 +721,12 @@ func TestFormatCallJSONErrorCall(t *testing.T) {
 		Duration:     200 * time.Millisecond,
 		StartTime:    start,
 		EndTime:      end,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     "openai",
 		RequestModel: "gpt-4o",
 		ErrorMessage: "rate_limit_exceeded",
 	}, jsonCall{
-		Type:         "call",
+		Kind:         "llm",
 		Sequence:     4,
 		Method:       "POST",
 		Host:         "api.openai.com",
@@ -618,7 +735,6 @@ func TestFormatCallJSONErrorCall(t *testing.T) {
 		DurationMs:   200,
 		StartTime:    "2026-03-24T12:00:05Z",
 		EndTime:      "2026-03-24T12:00:05.2Z",
-		IsLLM:        true,
 		Provider:     "openai",
 		RequestModel: "gpt-4o",
 		ErrorMessage: "rate_limit_exceeded",
@@ -630,7 +746,7 @@ func TestFormatCallJSONToolCalls(t *testing.T) {
 	start := time.Date(2026, 3, 24, 12, 0, 1, 0, time.UTC)
 	end := start.Add(4500 * time.Millisecond)
 
-	checkFormatCallJSON(t, capture.CapturedCall{
+	checkFormatCallJSON(t, capture.Call{
 		Sequence:     2,
 		Method:       "POST",
 		Host:         "api.anthropic.com",
@@ -639,7 +755,7 @@ func TestFormatCallJSONToolCalls(t *testing.T) {
 		Duration:     4500 * time.Millisecond,
 		StartTime:    start,
 		EndTime:      end,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     "anthropic",
 		RequestModel: "claude-3-5-sonnet-20241022",
 		Model:        "claude-3-5-sonnet-20241022",
@@ -650,7 +766,7 @@ func TestFormatCallJSONToolCalls(t *testing.T) {
 		ToolCalls:    []string{"read_file", "grep"},
 		ToolCallArgs: []string{`{"path":"foo.go"}`, `{"pattern":"TODO"}`},
 	}, jsonCall{
-		Type:         "call",
+		Kind:         "llm",
 		Sequence:     2,
 		Method:       "POST",
 		Host:         "api.anthropic.com",
@@ -659,7 +775,6 @@ func TestFormatCallJSONToolCalls(t *testing.T) {
 		DurationMs:   4500,
 		StartTime:    "2026-03-24T12:00:01Z",
 		EndTime:      "2026-03-24T12:00:05.5Z",
-		IsLLM:        true,
 		Provider:     "anthropic",
 		RequestModel: "claude-3-5-sonnet-20241022",
 		Model:        "claude-3-5-sonnet-20241022",
@@ -678,7 +793,7 @@ func TestFormatCallJSONWithCacheTokens(t *testing.T) {
 	start := time.Date(2026, 3, 24, 12, 0, 3, 0, time.UTC)
 	end := start.Add(1200 * time.Millisecond)
 
-	checkFormatCallJSON(t, capture.CapturedCall{
+	checkFormatCallJSON(t, capture.Call{
 		Sequence:         5,
 		Method:           "POST",
 		Host:             "api.anthropic.com",
@@ -687,7 +802,7 @@ func TestFormatCallJSONWithCacheTokens(t *testing.T) {
 		Duration:         1200 * time.Millisecond,
 		StartTime:        start,
 		EndTime:          end,
-		IsLLM:            true,
+		Kind:             capture.KindLLM,
 		Provider:         "anthropic",
 		RequestModel:     "claude-3-5-sonnet-20241022",
 		Model:            "claude-3-5-sonnet-20241022",
@@ -698,7 +813,7 @@ func TestFormatCallJSONWithCacheTokens(t *testing.T) {
 		CacheWriteTokens: 1500,
 		FinishReason:     "end_turn",
 	}, jsonCall{
-		Type:             "call",
+		Kind:             "llm",
 		Sequence:         5,
 		Method:           "POST",
 		Host:             "api.anthropic.com",
@@ -707,7 +822,6 @@ func TestFormatCallJSONWithCacheTokens(t *testing.T) {
 		DurationMs:       1200,
 		StartTime:        "2026-03-24T12:00:03Z",
 		EndTime:          "2026-03-24T12:00:04.2Z",
-		IsLLM:            true,
 		Provider:         "anthropic",
 		RequestModel:     "claude-3-5-sonnet-20241022",
 		Model:            "claude-3-5-sonnet-20241022",
@@ -724,7 +838,7 @@ func TestFormatCallJSONWithCacheTokens(t *testing.T) {
 func TestFormatCallJSONIsValidJSON(t *testing.T) {
 	t.Parallel()
 
-	line := formatCallJSON(capture.CapturedCall{
+	line := formatCallJSON(capture.Call{
 		Sequence:   1,
 		Method:     "GET",
 		Host:       "example.com",
@@ -765,28 +879,28 @@ func TestPrintJSONSummary(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		InputTokens:  100,
 		OutputTokens: 50,
 		Duration:     2 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		InputTokens:  200,
 		OutputTokens: 100,
 		Duration:     3 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Model:        "claude-3-5-sonnet-20241022",
 		InputTokens:  500,
 		OutputTokens: 200,
 		Duration:     4 * time.Second,
 	})
-	stats.record(capture.CapturedCall{IsLLM: false, Host: "github.com"})
+	stats.record(capture.Call{Kind: capture.KindHTTP, Host: "github.com"})
 
 	checkPrintJSON(t, &stats, nil, jsonSummary{
 		Type:          "summary",
@@ -812,8 +926,8 @@ func TestPrintJSONSummaryWithCacheTokens(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:            true,
+	stats.record(capture.Call{
+		Kind:             capture.KindLLM,
 		Model:            "claude-3-5-sonnet-20241022",
 		InputTokens:      2000,
 		OutputTokens:     500,
@@ -838,16 +952,16 @@ func TestPrintJSONSummaryWithCost(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Provider:     "openai",
 		Model:        "gpt-4o",
 		InputTokens:  1000,
 		OutputTokens: 500,
 		Duration:     2 * time.Second,
 	})
-	stats.record(capture.CapturedCall{
-		IsLLM:        true,
+	stats.record(capture.Call{
+		Kind:         capture.KindLLM,
 		Provider:     "anthropic",
 		Model:        "claude-sonnet-4",
 		InputTokens:  2000,
@@ -873,8 +987,8 @@ func TestPrintJSONSummaryWithEnvironmentTags(t *testing.T) {
 	t.Parallel()
 
 	var stats sessionStats
-	stats.record(capture.CapturedCall{
-		IsLLM:    true,
+	stats.record(capture.Call{
+		Kind:     capture.KindLLM,
 		Model:    "gpt-4o",
 		Duration: 1 * time.Second,
 	})

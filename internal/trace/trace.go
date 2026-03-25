@@ -94,8 +94,8 @@ func StartSessionSpan(ctx context.Context, tp oteltrace.TracerProvider, command 
 	return ctx, span
 }
 
-// EmitSpan creates an OTel span from a CapturedCall.
-func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.CapturedCall) {
+// EmitSpan creates an OTel span from a Call.
+func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Call) {
 	tracer := tp.Tracer("aitrace")
 
 	spanName := callSpanName(call)
@@ -120,17 +120,16 @@ func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Cap
 		attribute.Int("http.response.status_code", call.StatusCode),
 	}
 
-	if call.IsLLM {
-		attrs = append(attrs, attribute.String("aitrace.call.kind", "llm"))
-	} else {
-		attrs = append(attrs, attribute.String("aitrace.call.kind", "http"))
+	attrs = append(attrs, attribute.String("aitrace.call.kind", string(call.Kind)))
+
+	if call.Kind != capture.KindLLM {
 		if call.Path != "" {
 			attrs = append(attrs, attribute.String("url.path", call.Path))
 		}
 	}
 
 	// LLM-specific attributes (gen_ai.* semantic conventions).
-	if call.IsLLM {
+	if call.Kind == capture.KindLLM {
 		attrs = append(attrs, attribute.String("gen_ai.operation.name", "chat"))
 		if call.Provider != "" {
 			attrs = append(attrs, attribute.String("gen_ai.system", call.Provider))
@@ -207,14 +206,14 @@ func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Cap
 
 // callSpanName builds the span name for Jaeger.
 // LLM: "read_file, grep", "stop", "chat". HTTP: "GET github.com".
-func callSpanName(call capture.CapturedCall) string {
-	if !call.IsLLM {
+func callSpanName(call capture.Call) string {
+	if call.Kind != capture.KindLLM {
 		return httpCallSpanName(call)
 	}
 	return llmCallSpanName(call)
 }
 
-func llmCallSpanName(call capture.CapturedCall) string {
+func llmCallSpanName(call capture.Call) string {
 	if len(call.ToolCalls) > 0 {
 		return strings.Join(call.ToolCalls, ", ")
 	}
@@ -224,13 +223,13 @@ func llmCallSpanName(call capture.CapturedCall) string {
 	return "chat"
 }
 
-func httpCallSpanName(call capture.CapturedCall) string {
+func httpCallSpanName(call capture.Call) string {
 	return call.Method + " " + call.Host
 }
 
 // CallOutcome returns the aitrace.call.outcome attribute value.
-func CallOutcome(call capture.CapturedCall) string {
-	if call.IsLLM {
+func CallOutcome(call capture.Call) string {
+	if call.Kind == capture.KindLLM {
 		switch {
 		case call.StatusCode >= 400:
 			outcome := strconv.Itoa(call.StatusCode)

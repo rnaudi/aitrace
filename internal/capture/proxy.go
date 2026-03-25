@@ -6,7 +6,7 @@
 //
 // Why: go-mitmproxy's Response() hook never fires for SSE streams
 // (Content-Type: text/event-stream). We use SSEStart/SSEMessage/SSEEnd
-// instead and merge chunks into a single CapturedCall at stream end.
+// instead and merge chunks into a single Call at stream end.
 //
 // Design: All addon hooks that can panic (SSE hooks, Response) have
 // defer/recover so a parsing bug cannot crash the proxy goroutine.
@@ -56,7 +56,7 @@ type ProxyOptions struct {
 	// Wildcard suffixes to intercept. If nil, DefaultLLMWildcards() is used.
 	Wildcards []string
 	// OnCall is invoked for each intercepted call. May be nil.
-	OnCall func(CapturedCall)
+	OnCall func(Call)
 	// SslInsecure disables upstream TLS certificate verification.
 	// Default (false) verifies upstream certs against the system CA bundle.
 	SslInsecure bool
@@ -64,7 +64,7 @@ type ProxyOptions struct {
 
 // sseFlow tracks an in-flight SSE stream for a single proxy flow.
 // Chunks accumulate here until SSEEnd fires, then we merge and emit
-// a single CapturedCall. The flow is keyed by go-mitmproxy's UUID
+// a single Call. The flow is keyed by go-mitmproxy's UUID
 // and protected by Proxy.sseMu.
 type sseFlow struct {
 	startTime    time.Time
@@ -72,7 +72,7 @@ type sseFlow struct {
 	host         string
 	path         string
 	statusCode   int
-	isLLM        bool
+	kind         CallKind
 	provider     string
 	requestModel string
 	chunks       []ParsedResponse
@@ -89,7 +89,7 @@ type Proxy struct {
 	callSeq atomic.Uint64
 
 	mu    sync.Mutex
-	calls []CapturedCall
+	calls []Call
 
 	sseMu    sync.Mutex
 	sseFlows map[uuid.UUID]*sseFlow
@@ -240,7 +240,18 @@ func stripPort(host string) string {
 	return host
 }
 
-func (p *Proxy) recordCall(call CapturedCall) {
+// callKind returns KindLLM for known LLM API hosts, KindHTTP otherwise.
+func (p *Proxy) callKind(host string) CallKind {
+	if p.isLLMHost(host) {
+		return KindLLM
+	}
+	return KindHTTP
+}
+
+func (p *Proxy) recordCall(call Call) {
+	if call.Kind == "" {
+		panic("call recorded without Kind")
+	}
 	p.mu.Lock()
 	p.calls = append(p.calls, call)
 	p.mu.Unlock()
@@ -251,10 +262,10 @@ func (p *Proxy) recordCall(call CapturedCall) {
 }
 
 // Calls returns a copy of all captured calls.
-func (p *Proxy) Calls() []CapturedCall {
+func (p *Proxy) Calls() []Call {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]CapturedCall, len(p.calls))
+	out := make([]Call, len(p.calls))
 	copy(out, p.calls)
 	return out
 }
@@ -297,7 +308,7 @@ func (p *Proxy) SSEStart(f *proxy.Flow) {
 	}()
 
 	host := stripPort(f.Request.URL.Host)
-	isLLM := p.isLLMHost(host)
+	kind := p.callKind(host)
 
 	sf := &sseFlow{
 		startTime:  f.StartTime,
@@ -305,10 +316,10 @@ func (p *Proxy) SSEStart(f *proxy.Flow) {
 		host:       host,
 		path:       f.Request.URL.Path,
 		statusCode: f.Response.StatusCode,
-		isLLM:      isLLM,
+		kind:       kind,
 	}
 
-	if isLLM {
+	if kind == KindLLM {
 		sf.provider = InferProvider(host)
 		if f.Request.Body != nil {
 			sf.requestModel = ParseRequestModel(f.Request.Body)
@@ -332,7 +343,7 @@ func (p *Proxy) SSEMessage(f *proxy.Flow) {
 	}
 
 	// Only parse SSE chunks for LLM hosts.
-	if !sf.isLLM {
+	if sf.kind != KindLLM {
 		return
 	}
 
@@ -369,7 +380,8 @@ func (p *Proxy) SSEEnd(f *proxy.Flow) {
 	// Safe to read sf without lock — delete(sseFlows) above ensures no other
 	// hook can access this flow.
 	endTime := time.Now()
-	call := CapturedCall{
+	call := Call{
+		Kind:       sf.kind,
 		Method:     sf.method,
 		Host:       sf.host,
 		Path:       sf.path,
@@ -378,10 +390,9 @@ func (p *Proxy) SSEEnd(f *proxy.Flow) {
 		StartTime:  sf.startTime,
 		EndTime:    endTime,
 		Sequence:   int(p.callSeq.Add(1)),
-		IsLLM:      sf.isLLM,
 	}
 
-	if sf.isLLM {
+	if sf.kind == KindLLM {
 		merged := MergeSSEChunks(sf.chunks)
 		call.Provider = sf.provider
 		call.RequestModel = sf.requestModel
@@ -399,7 +410,7 @@ func (p *Proxy) SSEEnd(f *proxy.Flow) {
 	p.recordCall(call)
 }
 
-// TODO: emit a CapturedCall with error info so failed upstream connections
+// TODO: emit a Call with error info so failed upstream connections
 // appear in the trace instead of silently disappearing. Currently the child
 // gets an error response but aitrace shows nothing.
 func (p *Proxy) RequestError(f *proxy.Flow, err error)     {}
@@ -411,10 +422,11 @@ func (p *Proxy) Response(f *proxy.Flow) {
 	defer recoverHook("Response")
 
 	host := stripPort(f.Request.URL.Host)
-	isLLM := p.isLLMHost(host)
+	kind := p.callKind(host)
 
 	endTime := time.Now()
-	call := CapturedCall{
+	call := Call{
+		Kind:       kind,
 		Method:     f.Request.Method,
 		Host:       host,
 		Path:       f.Request.URL.Path,
@@ -423,11 +435,10 @@ func (p *Proxy) Response(f *proxy.Flow) {
 		StartTime:  f.StartTime,
 		EndTime:    endTime,
 		Sequence:   int(p.callSeq.Add(1)),
-		IsLLM:      isLLM,
 	}
 
 	// Only parse request/response bodies for LLM API hosts.
-	if isLLM {
+	if kind == KindLLM {
 		call.Provider = InferProvider(host)
 
 		if f.Request.Body != nil {
@@ -447,9 +458,9 @@ func (p *Proxy) Response(f *proxy.Flow) {
 }
 
 // parseNonStreamingResponse dispatches to the provider-specific response parser
-// and populates the CapturedCall fields. Separate code paths per provider rather
+// and populates the Call fields. Separate code paths per provider rather
 // than conditionals inside a single parser.
-func parseNonStreamingResponse(call *CapturedCall, body []byte) {
+func parseNonStreamingResponse(call *Call, body []byte) {
 	if call.StatusCode >= 400 {
 		switch call.Provider {
 		case ProviderAnthropic:

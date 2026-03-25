@@ -113,7 +113,7 @@ func TestProxyInterceptsHTTPS(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:     "GET",
 		Host:       serverHost,
 		Path:       "/v1/chat/completions",
@@ -122,7 +122,7 @@ func TestProxyInterceptsHTTPS(t *testing.T) {
 		StartTime:  call.StartTime,
 		EndTime:    call.EndTime,
 		Sequence:   1,
-		IsLLM:      true,
+		Kind:       KindLLM,
 		Model:      "gpt-4o",
 	}, call)
 }
@@ -164,7 +164,7 @@ func TestProxyNonLLMHostCapturesMetadataOnly(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:     "GET",
 		Host:       serverHost,
 		Path:       "/some/api/path",
@@ -173,7 +173,7 @@ func TestProxyNonLLMHostCapturesMetadataOnly(t *testing.T) {
 		StartTime:  call.StartTime,
 		EndTime:    call.EndTime,
 		Sequence:   1,
-		IsLLM:      false,
+		Kind:       KindHTTP,
 	}, call)
 }
 
@@ -190,11 +190,11 @@ func TestProxyOnCallCallback(t *testing.T) {
 	serverHost := serverURL.Hostname()
 
 	var mu sync.Mutex
-	var callbackCalls []CapturedCall
+	var callbackCalls []Call
 
 	p := startTestProxyWithOpts(t, ProxyOptions{
 		Hosts: []string{serverHost},
-		OnCall: func(c CapturedCall) {
+		OnCall: func(c Call) {
 			mu.Lock()
 			callbackCalls = append(callbackCalls, c)
 			mu.Unlock()
@@ -254,7 +254,7 @@ func TestProxyMultipleHosts(t *testing.T) {
 		t.Fatalf("expected 2 captured calls, got %d", len(calls))
 	}
 
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:     "GET",
 		Host:       url1.Hostname(),
 		Path:       "/api/v1",
@@ -263,9 +263,9 @@ func TestProxyMultipleHosts(t *testing.T) {
 		StartTime:  calls[0].StartTime,
 		EndTime:    calls[0].EndTime,
 		Sequence:   calls[0].Sequence,
-		IsLLM:      true,
+		Kind:       KindLLM,
 	}, calls[0])
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:     "GET",
 		Host:       url2.Hostname(),
 		Path:       "/api/v2",
@@ -274,7 +274,7 @@ func TestProxyMultipleHosts(t *testing.T) {
 		StartTime:  calls[1].StartTime,
 		EndTime:    calls[1].EndTime,
 		Sequence:   calls[1].Sequence,
-		IsLLM:      true,
+		Kind:       KindLLM,
 	}, calls[1])
 }
 
@@ -327,7 +327,7 @@ func TestProxyPOSTRequest(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -336,7 +336,7 @@ func TestProxyPOSTRequest(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         KindLLM,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o-2024-05-13",
 		ResponseID:   "chatcmpl-abc123",
@@ -411,7 +411,7 @@ func TestProxySSEStreamingResponse(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -420,7 +420,7 @@ func TestProxySSEStreamingResponse(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         KindLLM,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o",
 		ResponseID:   "chatcmpl-sse1",
@@ -450,11 +450,11 @@ func TestProxySSEStreamingCallbackFires(t *testing.T) {
 	serverURL, _ := url.Parse(fakeServer.URL)
 
 	var mu sync.Mutex
-	var callbackCalls []CapturedCall
+	var callbackCalls []Call
 
 	p := startTestProxyWithOpts(t, ProxyOptions{
 		Hosts: []string{serverURL.Hostname()},
-		OnCall: func(c CapturedCall) {
+		OnCall: func(c Call) {
 			mu.Lock()
 			callbackCalls = append(callbackCalls, c)
 			mu.Unlock()
@@ -532,7 +532,7 @@ func TestProxyToolCallsNonStreaming(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -541,7 +541,7 @@ func TestProxyToolCallsNonStreaming(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         KindLLM,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o-2024-05-13",
 		ResponseID:   "chatcmpl-tc1",
@@ -603,7 +603,7 @@ func TestProxySSEStreamingToolCalls(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -612,7 +612,7 @@ func TestProxySSEStreamingToolCalls(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         KindLLM,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o",
 		ResponseID:   "chatcmpl-sse-tc",
@@ -661,7 +661,7 @@ func TestProxyErrorResponse(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -670,7 +670,7 @@ func TestProxyErrorResponse(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         KindLLM,
 		RequestModel: "gpt-4o",
 		ErrorMessage: "rate_limit_exceeded",
 	}, call)
@@ -729,13 +729,13 @@ func TestParseNonStreamingResponseAnthropicDispatch(t *testing.T) {
 		"content": [{"type": "text", "text": "Hello from Claude!"}]
 	}`
 
-	call := CapturedCall{
+	call := Call{
 		Provider:   ProviderAnthropic,
 		StatusCode: 200,
 	}
 	parseNonStreamingResponse(&call, []byte(anthropicResp))
 
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Provider:     ProviderAnthropic,
 		StatusCode:   200,
 		ResponseID:   "msg_dispatch1",
@@ -761,13 +761,13 @@ func TestParseNonStreamingResponseAnthropicToolUseDispatch(t *testing.T) {
 		]
 	}`
 
-	call := CapturedCall{
+	call := Call{
 		Provider:   ProviderAnthropic,
 		StatusCode: 200,
 	}
 	parseNonStreamingResponse(&call, []byte(anthropicResp))
 
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Provider:     ProviderAnthropic,
 		StatusCode:   200,
 		ResponseID:   "msg_dispatch_tools",
@@ -785,13 +785,13 @@ func TestParseNonStreamingResponseAnthropicErrorDispatch(t *testing.T) {
 
 	errorResp := `{"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}`
 
-	call := CapturedCall{
+	call := Call{
 		Provider:   ProviderAnthropic,
 		StatusCode: 529,
 	}
 	parseNonStreamingResponse(&call, []byte(errorResp))
 
-	assert.Equal(t, CapturedCall{
+	assert.Equal(t, Call{
 		Provider:     ProviderAnthropic,
 		StatusCode:   529,
 		ErrorMessage: "overloaded_error",
@@ -925,7 +925,7 @@ func TestResponsePanicDoesNotHangWait(t *testing.T) {
 
 	p := startTestProxyWithOpts(t, ProxyOptions{
 		Hosts: []string{serverURL.Hostname()},
-		OnCall: func(c CapturedCall) {
+		OnCall: func(c Call) {
 			panic("intentional test panic in OnCall")
 		},
 	})
@@ -978,7 +978,7 @@ func TestSSEPanicDoesNotHangWait(t *testing.T) {
 
 	p := startTestProxyWithOpts(t, ProxyOptions{
 		Hosts: []string{serverURL.Hostname()},
-		OnCall: func(c CapturedCall) {
+		OnCall: func(c Call) {
 			panic("intentional test panic in OnCall (SSE)")
 		},
 	})

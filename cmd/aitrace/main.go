@@ -57,8 +57,8 @@ Examples:
     aitrace doctor
 
 aitrace intercepts HTTPS calls to LLM providers (OpenAI, Anthropic,
-GitHub Copilot) and shows you every request: model, tokens, latency.
-No code changes needed.`
+GitHub Copilot) and all other HTTP traffic, showing you every request:
+model, tokens, latency. No code changes needed.`
 
 // Version can be set at link time to override debug.ReadBuildInfo when
 // building with goreleaser. It should look like "v0.1.0".
@@ -118,12 +118,19 @@ func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env)
 	sessionStart := time.Now()
 	var stats sessionStats
 	p, err := capture.NewProxy(capture.ProxyOptions{
-		OnCall: func(c capture.CapturedCall) {
+		OnCall: func(c capture.Call) {
 			stats.record(c)
 			if jsonOutput {
 				fmt.Fprintln(os.Stderr, formatCallJSON(c))
-			} else if c.IsLLM {
+				return
+			}
+			switch c.Kind {
+			case capture.KindLLM:
 				fmt.Fprintln(os.Stderr, formatCallLine(c))
+			case capture.KindHTTP:
+				fmt.Fprintln(os.Stderr, formatHTTPCallLine(c))
+			default:
+				panic("unhandled call kind: " + string(c.Kind))
 			}
 		},
 	})
@@ -224,12 +231,19 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	sessionStart := time.Now()
 	var stats sessionStats
 	p, err := capture.NewProxy(capture.ProxyOptions{
-		OnCall: func(c capture.CapturedCall) {
+		OnCall: func(c capture.Call) {
 			stats.record(c)
 			if jsonOutput {
 				fmt.Fprintln(os.Stderr, formatCallJSON(c))
-			} else if c.IsLLM {
-				fmt.Fprintln(os.Stderr, formatCallLine(c))
+			} else {
+				switch c.Kind {
+				case capture.KindLLM:
+					fmt.Fprintln(os.Stderr, formatCallLine(c))
+				case capture.KindHTTP:
+					fmt.Fprintln(os.Stderr, formatHTTPCallLine(c))
+				default:
+					panic("unhandled call kind: " + string(c.Kind))
+				}
 			}
 			trace.EmitSpan(ctx, tp, c)
 		},
@@ -340,11 +354,11 @@ type sessionStats struct {
 	hosts            map[string]int // non-LLM host -> call count
 }
 
-func (s *sessionStats) record(c capture.CapturedCall) {
+func (s *sessionStats) record(c capture.Call) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if c.IsLLM {
+	if c.Kind == capture.KindLLM {
 		s.llmCalls++
 		s.inputTokens += c.InputTokens
 		s.outputTokens += c.OutputTokens
@@ -388,7 +402,16 @@ func (s *sessionStats) print(w io.Writer, sessionStart time.Time, traceURL strin
 
 	fmt.Fprintf(w, "[aitrace] ---\n")
 
-	line := fmt.Sprintf("[aitrace] %d calls", s.llmCalls)
+	var callDesc string
+	if s.httpCalls == 0 {
+		callDesc = fmt.Sprintf("%d calls", s.llmCalls)
+	} else if s.llmCalls == 0 {
+		callDesc = fmt.Sprintf("%d HTTP calls", s.httpCalls)
+	} else {
+		callDesc = fmt.Sprintf("%d LLM + %d HTTP calls", s.llmCalls, s.httpCalls)
+	}
+
+	line := "[aitrace] " + callDesc
 	if s.inputTokens > 0 || s.outputTokens > 0 {
 		line += fmt.Sprintf(" %d/%d tok", s.inputTokens, s.outputTokens)
 	}
@@ -447,7 +470,7 @@ const (
 // Flags:  !cache (prompt caching active), !large (total tokens > 10k),
 //
 //	!long (duration > 10s), !error (status >= 400)
-func formatCallLine(c capture.CapturedCall) string {
+func formatCallLine(c capture.Call) string {
 	model := c.EffectiveModel()
 	if model == "" {
 		model = "(unknown)"
@@ -500,6 +523,21 @@ func formatCallLine(c capture.CapturedCall) string {
 	return line
 }
 
+// formatHTTPCallLine builds the one-line stderr summary for a non-LLM HTTP call.
+//
+// Normal: [aitrace] #5 GET github.com/repos/foo | 200 | 340ms
+// Error:  [aitrace] #9 GET api.example.com/health | 500 | 2.1s !error
+func formatHTTPCallLine(c capture.Call) string {
+	line := fmt.Sprintf("[aitrace] #%d %s %s%s", c.Sequence, c.Method, c.Host, c.Path)
+	line += fmt.Sprintf(" | %d", c.StatusCode)
+	line += " | " + c.Duration.Round(time.Millisecond).String()
+
+	if c.StatusCode >= 400 {
+		line += " !error"
+	}
+	return line
+}
+
 // formatTokenCount formats an integer with comma separators (e.g. 19659 → "19,659").
 func formatTokenCount(n int64) string {
 	if n < 0 {
@@ -527,15 +565,15 @@ func formatTokenCount(n int64) string {
 // --- JSONL output ---
 //
 // --json replaces the human-readable terminal output with one JSON object
-// per line to stderr. Each captured call emits a {"type":"call",...} line.
-// After the child exits, a {"type":"summary",...} line is emitted with
-// session totals. All calls (LLM + non-LLM) are included.
+// per line to stderr. Each captured call emits a {"kind":"llm",...} or
+// {"kind":"http",...} line. After the child exits, a {"type":"summary",...}
+// line is emitted with session totals.
 
-// jsonCall is the per-call JSONL object. Separate from CapturedCall to
+// jsonCall is the per-call JSONL object. Separate from Call to
 // control the exact wire format (snake_case, duration as milliseconds,
 // timestamps as RFC3339) without coupling to the internal type.
 type jsonCall struct {
-	Type         string   `json:"type"`
+	Kind         string   `json:"kind"`
 	Sequence     int      `json:"sequence"`
 	Method       string   `json:"method"`
 	Host         string   `json:"host"`
@@ -544,7 +582,6 @@ type jsonCall struct {
 	DurationMs   int64    `json:"duration_ms"`
 	StartTime    string   `json:"start_time"`
 	EndTime      string   `json:"end_time"`
-	IsLLM        bool     `json:"is_llm"`
 	Provider     string   `json:"provider,omitempty"`
 	RequestModel string   `json:"request_model,omitempty"`
 	Model        string   `json:"model,omitempty"`
@@ -561,10 +598,10 @@ type jsonCall struct {
 	Cost             float64 `json:"cost,omitempty"`
 }
 
-// formatCallJSON converts a CapturedCall to a single JSON line.
-func formatCallJSON(c capture.CapturedCall) string {
+// formatCallJSON converts a Call to a single JSON line.
+func formatCallJSON(c capture.Call) string {
 	jc := jsonCall{
-		Type:         "call",
+		Kind:         string(c.Kind),
 		Sequence:     c.Sequence,
 		Method:       c.Method,
 		Host:         c.Host,
@@ -573,7 +610,6 @@ func formatCallJSON(c capture.CapturedCall) string {
 		DurationMs:   c.Duration.Milliseconds(),
 		StartTime:    c.StartTime.UTC().Format(time.RFC3339Nano),
 		EndTime:      c.EndTime.UTC().Format(time.RFC3339Nano),
-		IsLLM:        c.IsLLM,
 		Provider:     c.Provider,
 		RequestModel: c.RequestModel,
 		Model:        c.Model,

@@ -2,8 +2,17 @@ package capture
 
 import "time"
 
-// CapturedCall represents a single intercepted HTTP call.
-type CapturedCall struct {
+// CallKind distinguishes LLM API calls from plain HTTP calls.
+type CallKind string
+
+const (
+	KindLLM  CallKind = "llm"
+	KindHTTP CallKind = "http"
+)
+
+// Call represents a single intercepted HTTP call.
+type Call struct {
+	Kind       CallKind
 	Method     string
 	Host       string
 	Path       string
@@ -12,9 +21,8 @@ type CapturedCall struct {
 	StartTime  time.Time // actual request start from the proxy flow
 	EndTime    time.Time // actual response end from the proxy flow
 	Sequence   int       // 1-based call number within the session
-	IsLLM      bool      // true for known LLM API hosts
 
-	// Parsed from request/response bodies. Only populated for LLM calls.
+	// Parsed from request/response bodies. Only populated when Kind == KindLLM.
 	Provider     string // "openai", "github-copilot", "anthropic", or ""
 	RequestModel string // model from the request body
 	Model        string // model from the response body (authoritative)
@@ -36,7 +44,7 @@ type CapturedCall struct {
 
 // EffectiveModel returns the response model, falling back to the request
 // model (e.g. for error responses that don't echo the model back).
-func (c CapturedCall) EffectiveModel() string {
+func (c Call) EffectiveModel() string {
 	if c.Model != "" {
 		return c.Model
 	}

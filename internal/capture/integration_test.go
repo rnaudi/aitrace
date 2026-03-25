@@ -101,11 +101,11 @@ func TestIntegrationProxyParseOTel(t *testing.T) {
 	serverURL, _ := url.Parse(fakeServer.URL)
 
 	var mu sync.Mutex
-	var capturedCalls []capture.CapturedCall
+	var capturedCalls []capture.Call
 
 	p := startTestProxyWithOpts(t, capture.ProxyOptions{
 		Hosts: []string{serverURL.Hostname()},
-		OnCall: func(c capture.CapturedCall) {
+		OnCall: func(c capture.Call) {
 			mu.Lock()
 			capturedCalls = append(capturedCalls, c)
 			mu.Unlock()
@@ -136,7 +136,7 @@ func TestIntegrationProxyParseOTel(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, capture.CapturedCall{
+	assert.Equal(t, capture.Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -145,7 +145,7 @@ func TestIntegrationProxyParseOTel(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o-2024-05-13",
 		ResponseID:   "chatcmpl-integ1",
@@ -216,11 +216,11 @@ func TestIntegrationProxyParseOTelSSE(t *testing.T) {
 	serverURL, _ := url.Parse(fakeServer.URL)
 
 	var mu sync.Mutex
-	var capturedCalls []capture.CapturedCall
+	var capturedCalls []capture.Call
 
 	p := startTestProxyWithOpts(t, capture.ProxyOptions{
 		Hosts: []string{serverURL.Hostname()},
-		OnCall: func(c capture.CapturedCall) {
+		OnCall: func(c capture.Call) {
 			mu.Lock()
 			capturedCalls = append(capturedCalls, c)
 			mu.Unlock()
@@ -253,7 +253,7 @@ func TestIntegrationProxyParseOTelSSE(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
-	assert.Equal(t, capture.CapturedCall{
+	assert.Equal(t, capture.Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
@@ -262,7 +262,7 @@ func TestIntegrationProxyParseOTelSSE(t *testing.T) {
 		StartTime:    call.StartTime,
 		EndTime:      call.EndTime,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o",
 		ResponseID:   "chatcmpl-sseinteg",

@@ -73,7 +73,7 @@ func mustLoadPrices() map[string]*providerPrices {
 // Calculate returns the estimated cost in USD for a single LLM call.
 // Returns 0 if the provider or model is not in the pricing table.
 //
-// Token counts follow the CapturedCall semantics:
+// Token counts follow the capture.Call semantics:
 //   - input: total input tokens (includes cached tokens for OpenAI)
 //   - output: output tokens
 //   - cacheRead: tokens served from cache (OpenAI cached_tokens, Anthropic cache_read_input_tokens)

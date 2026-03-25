@@ -18,14 +18,14 @@ func TestEmitSpanAttributes(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
 		Duration:     142 * time.Millisecond,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Provider:     capture.ProviderOpenAI,
 		RequestModel: "gpt-4o",
 		Model:        "gpt-4o-2024-05-13",
@@ -69,13 +69,13 @@ func TestEmitSpanNameFallsBackToChat(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
 		Duration:     100 * time.Millisecond,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
 		// No response model, no finish reason, no tool calls — falls back to "chat".
 	}
@@ -93,13 +93,13 @@ func TestEmitSpanNoModel(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "POST",
 		Host:       "api.openai.com",
 		Path:       "/v1/chat/completions",
 		StatusCode: 401,
 		Duration:   50 * time.Millisecond,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		// No model at all, error status code.
 	}
 
@@ -116,13 +116,13 @@ func TestEmitSpanOmitsZeroTokens(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "POST",
 		Host:       "api.openai.com",
 		Path:       "/v1/chat/completions",
 		StatusCode: 200,
 		Duration:   100 * time.Millisecond,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		Model:      "gpt-4o",
 		// Tokens are 0 — should not appear as attributes.
 	}
@@ -149,14 +149,14 @@ func TestEmitSpanCacheTokenAttributes(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:           "POST",
 		Host:             "api.anthropic.com",
 		Path:             "/v1/messages",
 		StatusCode:       200,
 		Duration:         1200 * time.Millisecond,
 		Sequence:         1,
-		IsLLM:            true,
+		Kind:             capture.KindLLM,
 		Provider:         capture.ProviderAnthropic,
 		Model:            "claude-3-5-sonnet-20241022",
 		InputTokens:      2000,
@@ -184,14 +184,14 @@ func TestEmitSpanCacheReadOnlyAttribute(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:          "POST",
 		Host:            "api.openai.com",
 		Path:            "/v1/chat/completions",
 		StatusCode:      200,
 		Duration:        1 * time.Second,
 		Sequence:        1,
-		IsLLM:           true,
+		Kind:            capture.KindLLM,
 		Provider:        capture.ProviderOpenAI,
 		Model:           "gpt-4o",
 		InputTokens:     2000,
@@ -217,13 +217,13 @@ func TestEmitSpanClientKind(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "POST",
 		Host:       "api.openai.com",
 		Path:       "/v1/chat/completions",
 		StatusCode: 200,
 		Duration:   100 * time.Millisecond,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 	}
 
 	EmitSpan(t.Context(), tp, call)
@@ -241,25 +241,25 @@ func TestSessionSpanGroupsCallsIntoOneTrace(t *testing.T) {
 
 	ctx, sessionSpan := StartSessionSpan(t.Context(), tp, "opencode")
 
-	call1 := capture.CapturedCall{
+	call1 := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
 		Duration:     100 * time.Millisecond,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		FinishReason: "stop",
 	}
-	call2 := capture.CapturedCall{
+	call2 := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
 		Duration:     200 * time.Millisecond,
 		Sequence:     2,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		FinishReason: "stop",
 	}
@@ -290,14 +290,14 @@ func TestEmitSpanToolCallsAttribute(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
 		Duration:     100 * time.Millisecond,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		FinishReason: "tool_calls",
 		ToolCalls:    []string{"read_file", "grep"},
@@ -321,13 +321,13 @@ func TestEmitSpanNoToolCallsOmitted(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
 		Duration:     100 * time.Millisecond,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		FinishReason: "stop",
 		// No ToolCalls — attribute should not appear.
@@ -349,14 +349,14 @@ func TestEmitSpanErrorStatus(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:       "POST",
 		Host:         "api.openai.com",
 		Path:         "/v1/chat/completions",
 		StatusCode:   429,
 		Duration:     200 * time.Millisecond,
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
 		ErrorMessage: "rate_limit_exceeded",
 	}
@@ -385,13 +385,13 @@ func TestEmitSpanErrorStatusNoMessage(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "POST",
 		Host:       "api.openai.com",
 		Path:       "/v1/chat/completions",
 		StatusCode: 500,
 		Duration:   50 * time.Millisecond,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		// ErrorMessage is empty — status description should be just the code.
 	}
 
@@ -415,13 +415,13 @@ func TestEmitSpanSuccessNoErrorStatus(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "POST",
 		Host:       "api.openai.com",
 		Path:       "/v1/chat/completions",
 		StatusCode: 200,
 		Duration:   100 * time.Millisecond,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		Model:      "gpt-4o",
 	}
 
@@ -437,9 +437,9 @@ func TestEmitSpanSuccessNoErrorStatus(t *testing.T) {
 
 func TestCallSpanNameLLMWithToolCalls(t *testing.T) {
 	t.Parallel()
-	name := callSpanName(capture.CapturedCall{
+	name := callSpanName(capture.Call{
 		Sequence:     1,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "gpt-4o",
 		StatusCode:   200,
 		FinishReason: "tool_calls",
@@ -451,9 +451,9 @@ func TestCallSpanNameLLMWithToolCalls(t *testing.T) {
 
 func TestCallSpanNameLLMWithError(t *testing.T) {
 	t.Parallel()
-	name := callSpanName(capture.CapturedCall{
+	name := callSpanName(capture.Call{
 		Sequence:     3,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
 		StatusCode:   429,
 		ErrorMessage: "rate_limit_exceeded",
@@ -464,9 +464,9 @@ func TestCallSpanNameLLMWithError(t *testing.T) {
 
 func TestCallSpanNameLLMWithStop(t *testing.T) {
 	t.Parallel()
-	name := callSpanName(capture.CapturedCall{
+	name := callSpanName(capture.Call{
 		Sequence:     2,
-		IsLLM:        true,
+		Kind:         capture.KindLLM,
 		Model:        "claude-opus-4.6",
 		StatusCode:   200,
 		FinishReason: "stop",
@@ -478,9 +478,9 @@ func TestCallSpanNameLLMWithStop(t *testing.T) {
 func TestCallSpanNameLLMNoOutcome(t *testing.T) {
 	t.Parallel()
 	// No finish reason, no error, no tool calls — falls back to "chat".
-	name := callSpanName(capture.CapturedCall{
+	name := callSpanName(capture.Call{
 		Sequence:   1,
-		IsLLM:      true,
+		Kind:       capture.KindLLM,
 		Model:      "gpt-4o",
 		StatusCode: 200,
 	})
@@ -490,8 +490,8 @@ func TestCallSpanNameLLMNoOutcome(t *testing.T) {
 func TestCallSpanNameLLMErrorNoModel(t *testing.T) {
 	t.Parallel()
 	// Error without any model or finish reason — falls back to "chat".
-	name := callSpanName(capture.CapturedCall{
-		IsLLM:      true,
+	name := callSpanName(capture.Call{
+		Kind:       capture.KindLLM,
 		StatusCode: 500,
 	})
 	assert.Equal(t, "chat", name)
@@ -500,13 +500,13 @@ func TestCallSpanNameLLMErrorNoModel(t *testing.T) {
 func TestCallSpanNameLLMFallback(t *testing.T) {
 	t.Parallel()
 	// LLM call with no model — should return "chat".
-	name := callSpanName(capture.CapturedCall{IsLLM: true})
+	name := callSpanName(capture.Call{Kind: capture.KindLLM})
 	assert.Equal(t, "chat", name)
 }
 
 func TestCallSpanNameHTTP(t *testing.T) {
 	t.Parallel()
-	name := callSpanName(capture.CapturedCall{
+	name := callSpanName(capture.Call{
 		Method:     "GET",
 		Host:       "github.com",
 		Path:       "/foo/bar/issues/123",
@@ -519,7 +519,7 @@ func TestCallSpanNameHTTP(t *testing.T) {
 
 func TestCallSpanNameHTTPPost(t *testing.T) {
 	t.Parallel()
-	name := callSpanName(capture.CapturedCall{
+	name := callSpanName(capture.Call{
 		Method:     "POST",
 		Host:       "api.stripe.com",
 		Path:       "/v1/charges",
@@ -531,7 +531,7 @@ func TestCallSpanNameHTTPPost(t *testing.T) {
 func TestCallSpanNameNonLLMEmptyCall(t *testing.T) {
 	t.Parallel()
 	// Non-LLM call with no fields — method + host (both empty).
-	name := callSpanName(capture.CapturedCall{})
+	name := callSpanName(capture.Call{})
 	assert.Equal(t, " ", name)
 }
 
@@ -540,14 +540,14 @@ func TestEmitSpanNonLLMAttributes(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "GET",
 		Host:       "github.com",
 		Path:       "/foo/bar/issues/123",
 		StatusCode: 200,
 		Duration:   800 * time.Millisecond,
 		Sequence:   5,
-		IsLLM:      false,
+		Kind:       capture.KindHTTP,
 	}
 
 	EmitSpan(t.Context(), tp, call)
@@ -581,14 +581,14 @@ func TestEmitSpanNonLLMErrorStatus(t *testing.T) {
 
 	tp, exporter := newTestTracerProvider(t)
 
-	call := capture.CapturedCall{
+	call := capture.Call{
 		Method:     "POST",
 		Host:       "api.example.com",
 		Path:       "/webhook",
 		StatusCode: 500,
 		Duration:   100 * time.Millisecond,
 		Sequence:   3,
-		IsLLM:      false,
+		Kind:       capture.KindHTTP,
 	}
 
 	EmitSpan(t.Context(), tp, call)
@@ -605,8 +605,8 @@ func TestEmitSpanNonLLMErrorStatus(t *testing.T) {
 
 func TestCallOutcomeLLMToolCalls(t *testing.T) {
 	t.Parallel()
-	outcome := CallOutcome(capture.CapturedCall{
-		IsLLM:      true,
+	outcome := CallOutcome(capture.Call{
+		Kind:       capture.KindLLM,
 		StatusCode: 200,
 		ToolCalls:  []string{"read_file", "grep"},
 	})
@@ -615,8 +615,8 @@ func TestCallOutcomeLLMToolCalls(t *testing.T) {
 
 func TestCallOutcomeLLMError(t *testing.T) {
 	t.Parallel()
-	outcome := CallOutcome(capture.CapturedCall{
-		IsLLM:        true,
+	outcome := CallOutcome(capture.Call{
+		Kind:         capture.KindLLM,
 		StatusCode:   429,
 		ErrorMessage: "rate_limit_exceeded",
 	})
@@ -625,8 +625,8 @@ func TestCallOutcomeLLMError(t *testing.T) {
 
 func TestCallOutcomeLLMFinishReason(t *testing.T) {
 	t.Parallel()
-	outcome := CallOutcome(capture.CapturedCall{
-		IsLLM:        true,
+	outcome := CallOutcome(capture.Call{
+		Kind:         capture.KindLLM,
 		StatusCode:   200,
 		FinishReason: "stop",
 	})
@@ -635,8 +635,8 @@ func TestCallOutcomeLLMFinishReason(t *testing.T) {
 
 func TestCallOutcomeHTTP(t *testing.T) {
 	t.Parallel()
-	outcome := CallOutcome(capture.CapturedCall{
-		IsLLM:      false,
+	outcome := CallOutcome(capture.Call{
+		Kind:       capture.KindHTTP,
 		StatusCode: 200,
 	})
 	assert.Equal(t, "200", outcome)
@@ -644,7 +644,7 @@ func TestCallOutcomeHTTP(t *testing.T) {
 
 func TestCallOutcomeHTTPNoStatus(t *testing.T) {
 	t.Parallel()
-	outcome := CallOutcome(capture.CapturedCall{IsLLM: false})
+	outcome := CallOutcome(capture.Call{Kind: capture.KindHTTP})
 	assert.Equal(t, "", outcome)
 }
 
