@@ -105,16 +105,17 @@ func runCmd(args []string) {
 	envs := envtags.Detect()
 
 	if *otelFlag {
-		runOTel(childArgs[0], childArgs[1:], *jsonFlag, envs)
+		os.Exit(runOTel(childArgs[0], childArgs[1:], *jsonFlag, envs))
 	} else {
-		runTerminal(childArgs[0], childArgs[1:], *jsonFlag, envs)
+		os.Exit(runTerminal(childArgs[0], childArgs[1:], *jsonFlag, envs))
 	}
 }
 
 // runTerminal runs the child process and prints call summaries to stderr.
 // No OpenTelemetry, no external dependencies — standalone terminal output.
 // When jsonOutput is true, JSONL replaces human-readable output.
-func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
+// Returns the child's exit code.
+func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env) int {
 	sessionStart := time.Now()
 	var stats sessionStats
 	p, err := capture.NewProxy(capture.ProxyOptions{
@@ -136,7 +137,7 @@ func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env)
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] create proxy: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	proxyErrCh := make(chan error, 1)
@@ -148,13 +149,13 @@ func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env)
 	defer waitCancel()
 	if err := capture.WaitForProxy(waitCtx, p.Addr()); err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] proxy not ready: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	select {
 	case err := <-proxyErrCh:
 		fmt.Fprintf(os.Stderr, "[aitrace] start proxy: %v\n", err)
-		os.Exit(1)
+		return 1
 	default:
 	}
 
@@ -172,14 +173,14 @@ func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env)
 	tmpDir, err := os.MkdirTemp("", "aitrace-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] create temp dir: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll(tmpDir)
 
 	pemPath, err := cert.WriteCombinedPEM(&caCert, tmpDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] write combined PEM: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	exitCode, _, err := run.Child(run.Options{
@@ -202,13 +203,14 @@ func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env)
 	} else {
 		stats.print(os.Stderr, sessionStart, "")
 	}
-	os.Exit(exitCode)
+	return exitCode
 }
 
 // runOTel runs the child process, prints call summaries to stderr, and
 // emits OpenTelemetry spans to an OTLP collector (default localhost:4317).
 // When jsonOutput is true, JSONL replaces human-readable output.
-func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
+// Returns the child's exit code.
+func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) int {
 	ctx := context.Background()
 	tp, err := trace.NewTracerProvider(ctx, trace.TracerOptions{
 		ServiceName:   filepath.Base(cmd),
@@ -216,7 +218,7 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] create tracer provider: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -227,6 +229,7 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	}()
 
 	ctx, sessionSpan := trace.StartSessionSpan(ctx, tp, filepath.Base(cmd))
+	defer sessionSpan.End()
 
 	sessionStart := time.Now()
 	var stats sessionStats
@@ -250,7 +253,7 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] create proxy: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	proxyErrCh := make(chan error, 1)
@@ -262,13 +265,13 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	defer waitCancel()
 	if err := capture.WaitForProxy(waitCtx, p.Addr()); err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] proxy not ready: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	select {
 	case err := <-proxyErrCh:
 		fmt.Fprintf(os.Stderr, "[aitrace] start proxy: %v\n", err)
-		os.Exit(1)
+		return 1
 	default:
 	}
 
@@ -286,14 +289,14 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	tmpDir, err := os.MkdirTemp("", "aitrace-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] create temp dir: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll(tmpDir)
 
 	pemPath, err := cert.WriteCombinedPEM(&caCert, tmpDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] write combined PEM: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	exitCode, childPID, err := run.Child(run.Options{
@@ -327,7 +330,6 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	}
 	p.Wait()
 
-	sessionSpan.End()
 	tp.ForceFlush(ctx)
 
 	traceID := sessionSpan.SpanContext().TraceID()
@@ -336,7 +338,7 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) {
 	} else {
 		stats.print(os.Stderr, sessionStart, "http://localhost:16686/trace/"+traceID.String())
 	}
-	os.Exit(exitCode)
+	return exitCode
 }
 
 // sessionStats accumulates metrics across calls for the exit summary.
@@ -455,7 +457,7 @@ func formatCountsDesc(m map[string]int) string {
 	return b.String()
 }
 
-// Flag thresholds for the human-readable call line.
+// Thresholds for !large and !long flags on the call line.
 const (
 	largeTokThreshold     = 50_000
 	longDurationThreshold = 30 * time.Second
@@ -463,13 +465,14 @@ const (
 
 // formatCallLine builds the one-line stderr summary for an LLM call.
 //
-// Normal: [aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1.2s | $0.007
-// Tools:  [aitrace] #2 claude-opus-4.6 | tok: 19,659 in / 106 out | 3.8s | $0.100 | tools: skill,glob !large
-// Cache:  [aitrace] #3 claude-3-5-sonnet | tok: 2,000 in / 500 out | 1.2s | $0.009 !cache
-// Error:  [aitrace] #4 gpt-4o | 429 rate_limit_exceeded | 0.2s !error
-// Flags:  !cache (prompt caching active), !large (total tokens > 50k),
+// Normal:  [aitrace] #1 gpt-4o | tok: 500 in / 100 out | 1.2s | $0.007
+// Tools:   [aitrace] #2 claude-opus-4.6 | tok: 19,659 in / 106 out | 3.8s | $0.100 | tools: skill,glob !large
+// Cache:   [aitrace] #3 claude-3-5-sonnet | tok: 2,000 in / 500 out | 1.2s | $0.009 !cache
+// Error:   [aitrace] #4 gpt-4o | 429 rate_limit_exceeded | 0.2s !error
+// ConnErr: [aitrace] #5 (unknown) | connection refused | 0.1s !error
+// Flags:   !cache (prompt caching active), !large (total tokens > 50k),
 //
-//	!long (duration > 30s), !error (status >= 400)
+//	!long (duration > 30s), !error (status >= 400 or connection error)
 func formatCallLine(c capture.Call) string {
 	model := c.EffectiveModel()
 	if model == "" {
@@ -478,8 +481,11 @@ func formatCallLine(c capture.Call) string {
 
 	line := fmt.Sprintf("[aitrace] #%d %s", c.Sequence, model)
 
-	if c.StatusCode >= 400 {
-		// Error path: show status + message instead of tokens.
+	if c.StatusCode == 0 && c.ErrorMessage != "" {
+		// Connection error: no HTTP response received.
+		line += " | " + c.ErrorMessage
+	} else if c.StatusCode >= 400 {
+		// HTTP error: show status + message instead of tokens.
 		errPart := fmt.Sprintf("%d", c.StatusCode)
 		if c.ErrorMessage != "" {
 			errPart += " " + c.ErrorMessage
@@ -516,7 +522,7 @@ func formatCallLine(c capture.Call) string {
 	if c.Duration > longDurationThreshold {
 		line += " !long"
 	}
-	if c.StatusCode >= 400 {
+	if c.StatusCode >= 400 || (c.StatusCode == 0 && c.ErrorMessage != "") {
 		line += " !error"
 	}
 
@@ -525,14 +531,20 @@ func formatCallLine(c capture.Call) string {
 
 // formatHTTPCallLine builds the one-line stderr summary for a non-LLM HTTP call.
 //
-// Normal: [aitrace] #5 GET github.com/repos/foo | 200 | 340ms
-// Error:  [aitrace] #9 GET api.example.com/health | 500 | 2.1s !error
+// Normal:  [aitrace] #5 GET github.com/repos/foo | 200 | 340ms
+// Error:   [aitrace] #9 GET api.example.com/health | 500 | 2.1s !error
+// ConnErr: [aitrace] #10 CONNECT api.example.com | connection refused | 50ms !error
 func formatHTTPCallLine(c capture.Call) string {
 	line := fmt.Sprintf("[aitrace] #%d %s %s%s", c.Sequence, c.Method, c.Host, c.Path)
-	line += fmt.Sprintf(" | %d", c.StatusCode)
+
+	if c.StatusCode == 0 && c.ErrorMessage != "" {
+		line += " | " + c.ErrorMessage
+	} else {
+		line += fmt.Sprintf(" | %d", c.StatusCode)
+	}
 	line += " | " + c.Duration.Round(time.Millisecond).String()
 
-	if c.StatusCode >= 400 {
+	if c.StatusCode >= 400 || (c.StatusCode == 0 && c.ErrorMessage != "") {
 		line += " !error"
 	}
 	return line
@@ -562,8 +574,6 @@ func formatTokenCount(n int64) string {
 	return b.String()
 }
 
-// --- JSONL output ---
-//
 // --json replaces the human-readable terminal output with one JSON object
 // per line to stderr. Each captured call emits a {"kind":"llm",...} or
 // {"kind":"http",...} line. After the child exits, a {"type":"summary",...}
@@ -734,8 +744,6 @@ func version() string {
 	return "(unknown)"
 }
 
-// --- doctor subcommand ---
-//
 // aitrace doctor probes each known LLM API host with a TLS handshake to
 // verify reachability and certificate trust from the current machine.
 // No proxy is started — this checks the system CA bundle directly.

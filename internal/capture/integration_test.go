@@ -136,14 +136,14 @@ func TestIntegrationProxyParseOTel(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
+	call.Duration = 0
+	call.StartTime = time.Time{}
+	call.EndTime = time.Time{}
 	assert.Equal(t, capture.Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
-		Duration:     call.Duration,
-		StartTime:    call.StartTime,
-		EndTime:      call.EndTime,
 		Sequence:     1,
 		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",
@@ -253,14 +253,14 @@ func TestIntegrationProxyParseOTelSSE(t *testing.T) {
 	assert.Greater(t, call.Duration, time.Duration(0))
 	assert.False(t, call.StartTime.IsZero(), "StartTime should be set")
 	assert.False(t, call.EndTime.IsZero(), "EndTime should be set")
+	call.Duration = 0
+	call.StartTime = time.Time{}
+	call.EndTime = time.Time{}
 	assert.Equal(t, capture.Call{
 		Method:       "POST",
 		Host:         serverURL.Hostname(),
 		Path:         "/v1/chat/completions",
 		StatusCode:   200,
-		Duration:     call.Duration,
-		StartTime:    call.StartTime,
-		EndTime:      call.EndTime,
 		Sequence:     1,
 		Kind:         capture.KindLLM,
 		RequestModel: "gpt-4o",

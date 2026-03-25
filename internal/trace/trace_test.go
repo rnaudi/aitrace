@@ -707,3 +707,81 @@ func spanAttrMap(span tracetest.SpanStub) map[string]attribute.Value {
 	}
 	return m
 }
+
+func TestEmitSpanLLMConnectionError(t *testing.T) {
+	t.Parallel()
+
+	tp, exporter := newTestTracerProvider(t)
+
+	call := capture.Call{
+		Method:       "POST",
+		Host:         "api.openai.com",
+		Path:         "/v1/chat/completions",
+		Duration:     50 * time.Millisecond,
+		Sequence:     5,
+		Kind:         capture.KindLLM,
+		Provider:     capture.ProviderOpenAI,
+		RequestModel: "gpt-4o",
+		ErrorMessage: "connection refused",
+	}
+
+	EmitSpan(t.Context(), tp, call)
+	tp.ForceFlush(t.Context())
+
+	spans := exporter.GetSpans()
+	assert.Equal(t, 1, len(spans))
+
+	span := spans[0]
+	assert.Equal(t, "chat", span.Name)
+	assert.Equal(t, codes.Error, span.Status.Code)
+	assert.Equal(t, "connection refused", span.Status.Description)
+
+	attrMap := spanAttrMap(span)
+	assert.Equal(t, attribute.StringValue("connection refused"), attrMap["aitrace.error.message"])
+	assert.Equal(t, attribute.IntValue(0), attrMap["http.response.status_code"])
+}
+
+func TestEmitSpanHTTPConnectionError(t *testing.T) {
+	t.Parallel()
+
+	tp, exporter := newTestTracerProvider(t)
+
+	call := capture.Call{
+		Method:       "CONNECT",
+		Host:         "api.example.com",
+		Duration:     100 * time.Millisecond,
+		Sequence:     7,
+		Kind:         capture.KindHTTP,
+		ErrorMessage: "no such host",
+	}
+
+	EmitSpan(t.Context(), tp, call)
+	tp.ForceFlush(t.Context())
+
+	spans := exporter.GetSpans()
+	assert.Equal(t, 1, len(spans))
+
+	span := spans[0]
+	assert.Equal(t, "CONNECT api.example.com", span.Name)
+	assert.Equal(t, codes.Error, span.Status.Code)
+	assert.Equal(t, "no such host", span.Status.Description)
+
+	attrMap := spanAttrMap(span)
+	assert.Equal(t, attribute.StringValue("no such host"), attrMap["aitrace.error.message"])
+}
+
+func TestCallOutcomeConnectionErrorLLM(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "connection refused", CallOutcome(capture.Call{
+		Kind:         capture.KindLLM,
+		ErrorMessage: "connection refused",
+	}))
+}
+
+func TestCallOutcomeConnectionErrorHTTP(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "no such host", CallOutcome(capture.Call{
+		Kind:         capture.KindHTTP,
+		ErrorMessage: "no such host",
+	}))
+}

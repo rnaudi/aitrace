@@ -2,7 +2,6 @@ package capture
 
 import "time"
 
-// CallKind distinguishes LLM API calls from plain HTTP calls.
 type CallKind string
 
 const (
@@ -10,7 +9,6 @@ const (
 	KindHTTP CallKind = "http"
 )
 
-// Call represents a single intercepted HTTP call.
 type Call struct {
 	Kind       CallKind
 	Method     string

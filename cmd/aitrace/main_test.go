@@ -483,6 +483,27 @@ func TestFormatCallLineCacheAndLargeFlags(t *testing.T) {
 	}, "[aitrace] #1 claude-3-5-sonnet-20241022 | tok: 48,000 in / 3,000 out | 3s !cache !large")
 }
 
+func TestFormatCallLineConnectionError(t *testing.T) {
+	t.Parallel()
+	checkFormatCallLine(t, capture.Call{
+		Sequence:     5,
+		Kind:         capture.KindLLM,
+		ErrorMessage: "connection refused",
+		Duration:     100 * time.Millisecond,
+	}, "[aitrace] #5 (unknown) | connection refused | 100ms !error")
+}
+
+func TestFormatCallLineConnectionErrorWithRequestModel(t *testing.T) {
+	t.Parallel()
+	checkFormatCallLine(t, capture.Call{
+		Sequence:     3,
+		Kind:         capture.KindLLM,
+		RequestModel: "gpt-4o",
+		ErrorMessage: "no such host",
+		Duration:     50 * time.Millisecond,
+	}, "[aitrace] #3 gpt-4o | no such host | 50ms !error")
+}
+
 func TestFormatCallLineErrorNoMessage(t *testing.T) {
 	t.Parallel()
 	checkFormatCallLine(t, capture.Call{
@@ -540,8 +561,6 @@ func TestFormatCallLineErrorNoCost(t *testing.T) {
 		Duration:     200 * time.Millisecond,
 	}, "[aitrace] #1 gpt-4o | 429 rate_limit_exceeded | 200ms !error")
 }
-
-// --- HTTP call line tests ---
 
 func checkFormatHTTPCallLine(t *testing.T, c capture.Call, want string) {
 	t.Helper()
@@ -602,6 +621,30 @@ func TestFormatHTTPCallLineLong(t *testing.T) {
 	}, "[aitrace] #1 GET slow.example.com/data | 200 | 15s")
 }
 
+func TestFormatHTTPCallLineConnectionError(t *testing.T) {
+	t.Parallel()
+	checkFormatHTTPCallLine(t, capture.Call{
+		Sequence:     10,
+		Kind:         capture.KindHTTP,
+		Method:       "CONNECT",
+		Host:         "api.example.com",
+		ErrorMessage: "connection refused",
+		Duration:     50 * time.Millisecond,
+	}, "[aitrace] #10 CONNECT api.example.com | connection refused | 50ms !error")
+}
+
+func TestFormatHTTPCallLineDNSError(t *testing.T) {
+	t.Parallel()
+	checkFormatHTTPCallLine(t, capture.Call{
+		Sequence:     7,
+		Kind:         capture.KindHTTP,
+		Method:       "CONNECT",
+		Host:         "nonexistent.example.com",
+		ErrorMessage: "no such host",
+		Duration:     100 * time.Millisecond,
+	}, "[aitrace] #7 CONNECT nonexistent.example.com | no such host | 100ms !error")
+}
+
 func TestFormatTokenCount(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "0", formatTokenCount(0))
@@ -615,8 +658,6 @@ func TestFormatTokenCount(t *testing.T) {
 	assert.Equal(t, "100,000", formatTokenCount(100000))
 	assert.Equal(t, "1,000,000", formatTokenCount(1000000))
 }
-
-// --- JSON output tests ---
 
 // checkFormatCallJSON verifies that formatCallJSON produces valid JSON that
 // round-trips through jsonCall and matches the expected struct.
@@ -738,6 +779,38 @@ func TestFormatCallJSONErrorCall(t *testing.T) {
 		Provider:     "openai",
 		RequestModel: "gpt-4o",
 		ErrorMessage: "rate_limit_exceeded",
+	})
+}
+
+func TestFormatCallJSONConnectionError(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 3, 24, 12, 0, 6, 0, time.UTC)
+	end := start.Add(50 * time.Millisecond)
+
+	checkFormatCallJSON(t, capture.Call{
+		Sequence:     5,
+		Method:       "POST",
+		Host:         "api.openai.com",
+		Path:         "/v1/chat/completions",
+		Duration:     50 * time.Millisecond,
+		StartTime:    start,
+		EndTime:      end,
+		Kind:         capture.KindLLM,
+		Provider:     "openai",
+		RequestModel: "gpt-4o",
+		ErrorMessage: "connection refused",
+	}, jsonCall{
+		Kind:         "llm",
+		Sequence:     5,
+		Method:       "POST",
+		Host:         "api.openai.com",
+		Path:         "/v1/chat/completions",
+		DurationMs:   50,
+		StartTime:    "2026-03-24T12:00:06Z",
+		EndTime:      "2026-03-24T12:00:06.05Z",
+		Provider:     "openai",
+		RequestModel: "gpt-4o",
+		ErrorMessage: "connection refused",
 	})
 }
 
@@ -1016,8 +1089,6 @@ func TestPrintJSONSummaryWithEnvironmentTags(t *testing.T) {
 	})
 }
 
-// --- envSummary tests ---
-
 func checkEnvSummary(t *testing.T, envs []envtags.Env, want string) {
 	t.Helper()
 	got := envSummary(envs)
@@ -1044,8 +1115,6 @@ func TestEnvSummaryMultiple(t *testing.T) {
 		{Kind: envtags.Kubernetes},
 	}, "github-actions, aws, k8s")
 }
-
-// --- envJSONTags tests ---
 
 func checkEnvJSONTags(t *testing.T, envs []envtags.Env, want map[string]string) {
 	t.Helper()
@@ -1085,8 +1154,6 @@ func TestEnvJSONTagsMultipleWithTags(t *testing.T) {
 		"cloud.region":   "us-east-1",
 	})
 }
-
-// --- envResourceAttrs tests ---
 
 func checkEnvResourceAttrs(t *testing.T, envs []envtags.Env, want []attribute.KeyValue) {
 	t.Helper()
@@ -1146,8 +1213,6 @@ func TestEnvResourceAttrsMixed(t *testing.T) {
 		attribute.Bool("aitrace.kubernetes", true),
 	})
 }
-
-// --- doctor / probeHost tests ---
 
 func TestProbeHostSuccess(t *testing.T) {
 	t.Parallel()

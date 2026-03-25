@@ -525,8 +525,6 @@ func TestParseOpenAIErrorNonErrorBody(t *testing.T) {
 	assert.Equal(t, "", ParseOpenAIError([]byte(`{"id":"chatcmpl-abc","model":"gpt-4o"}`)))
 }
 
-// --- Anthropic parser tests ---
-
 func checkParseAnthropicResponse(t *testing.T, body string, want ParsedResponse) {
 	t.Helper()
 	got := ParseAnthropicResponse([]byte(body))

@@ -22,8 +22,6 @@ func checkFormatUSD(t *testing.T, cost float64, want string) {
 	assert.Equal(t, want, got)
 }
 
-// --- OpenAI ---
-
 func TestCalculateOpenAIExactModel(t *testing.T) {
 	t.Parallel()
 	// gpt-4o: $2.50/1M input, $10.00/1M output
@@ -59,8 +57,6 @@ func TestCalculateOpenAIAllCached(t *testing.T) {
 	// gpt-4o: 0 regular + 1000 * $1.25/1M + 500 * $10.00/1M = 0.00125 + 0.005 = 0.00625
 	checkCalculate(t, "openai", "gpt-4o", 1000, 500, 1000, 0, 0.00625)
 }
-
-// --- Anthropic ---
 
 func TestCalculateAnthropicExactModel(t *testing.T) {
 	t.Parallel()
@@ -100,7 +96,6 @@ func TestCalculateAnthropicCacheReadAndWrite(t *testing.T) {
 	checkCalculate(t, "anthropic", "claude-sonnet-4", 2000, 1000, 500, 300, 0.022275)
 }
 
-// --- Anthropic dotted model names ---
 // Anthropic API responses return dots (claude-opus-4.6) but docs use hyphens (claude-opus-4-6).
 // Both forms must resolve to the same pricing.
 
@@ -140,8 +135,6 @@ func TestCalculateAnthropicDottedWithDateSuffix(t *testing.T) {
 	checkCalculate(t, "anthropic", "claude-opus-4.6-20250601", 2000, 1000, 0, 0, 0.035)
 }
 
-// --- GitHub Copilot → OpenAI ---
-
 func TestCalculateGitHubCopilotMapsToOpenAI(t *testing.T) {
 	t.Parallel()
 	// GitHub Copilot uses OpenAI models, same pricing.
@@ -169,7 +162,6 @@ func TestCalculateGitHubCopilotGPT5(t *testing.T) {
 	checkCalculate(t, "github-copilot", "gpt-5", 1000, 500, 0, 0, 0.01)
 }
 
-// --- GitHub Copilot → Anthropic (fallback) ---
 // Copilot routes Claude models but provider is "github-copilot". The cost
 // lookup must fall back to the Anthropic pricing table.
 
@@ -197,8 +189,6 @@ func TestCalculateGitHubCopilotClaudeSonnetDated(t *testing.T) {
 	checkCalculate(t, "github-copilot", "claude-sonnet-4-20250514", 2000, 1000, 0, 0, 0.021)
 }
 
-// --- Edge cases ---
-
 func TestCalculateUnknownProvider(t *testing.T) {
 	t.Parallel()
 	checkCalculate(t, "google", "gemini-pro", 1000, 500, 0, 0, 0)
@@ -223,8 +213,6 @@ func TestCalculateZeroTokens(t *testing.T) {
 	t.Parallel()
 	checkCalculate(t, "openai", "gpt-4o", 0, 0, 0, 0, 0)
 }
-
-// --- FormatUSD ---
 
 func TestFormatUSDNormal(t *testing.T) {
 	t.Parallel()
@@ -257,8 +245,6 @@ func TestFormatUSDJustAboveThreshold(t *testing.T) {
 	// $0.0005 rounds to "$0.001" — should be displayed.
 	checkFormatUSD(t, 0.0005, "$0.001")
 }
-
-// --- Property tests ---
 
 func TestCalculateNonNegativeProperty(t *testing.T) {
 	t.Parallel()

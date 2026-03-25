@@ -41,8 +41,7 @@ type openaiRequest struct {
 	Model string `json:"model"`
 }
 
-// ParseRequestModel extracts the model from an LLM API request body.
-// Both OpenAI and Anthropic use {"model":"..."} so a single parser works.
+// ParseRequestModel works for both OpenAI and Anthropic — both use {"model":"..."}.
 func ParseRequestModel(body []byte) string {
 	var req openaiRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -85,7 +84,6 @@ type openaiToolCall struct {
 	} `json:"function"`
 }
 
-// ParsedResponse holds fields extracted from an LLM API response body.
 type ParsedResponse struct {
 	ID           string
 	Model        string
@@ -108,7 +106,9 @@ type ParsedResponse struct {
 	rawToolCalls []openaiToolCall
 }
 
-// ParseOpenAIResponse extracts fields from an OpenAI-format response body.
+// ParseOpenAIResponse handles both native OpenAI and OpenAI-compatible APIs
+// (GitHub Copilot, Azure OpenAI). Token fields may be zero when the provider
+// omits usage data.
 func ParseOpenAIResponse(body []byte) ParsedResponse {
 	var resp openaiResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -168,8 +168,8 @@ type openaiSSEChoice struct {
 	} `json:"delta"`
 }
 
-// ParseOpenAISSEChunk parses a single SSE data payload from an OpenAI
-// streaming response. Returns a zero ParsedResponse for [DONE] or invalid JSON.
+// ParseOpenAISSEChunk returns a zero ParsedResponse for [DONE] or invalid JSON.
+// Callers accumulate non-zero fields across chunks to build the final response.
 func ParseOpenAISSEChunk(data string) ParsedResponse {
 	data = strings.TrimSpace(data)
 	if data == "[DONE]" || data == "" {
@@ -283,8 +283,6 @@ func MergeSSEChunks(chunks []ParsedResponse) ParsedResponse {
 	return merged
 }
 
-// --- Anthropic Messages API parsers ---
-
 // anthropicResponse is the subset of an Anthropic Messages API response we parse.
 // Anthropic uses input_tokens/output_tokens (not prompt_tokens/completion_tokens),
 // stop_reason (not finish_reason in choices), and content blocks (not choices).
@@ -315,7 +313,8 @@ type anthropicContent struct {
 	Input json.RawMessage `json:"input,omitempty"` // tool_use only
 }
 
-// ParseAnthropicResponse extracts fields from an Anthropic Messages API response body.
+// ParseAnthropicResponse handles the Messages API response format, which nests
+// tokens under "usage" and content under "content[].text".
 func ParseAnthropicResponse(body []byte) ParsedResponse {
 	var resp anthropicResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -369,7 +368,7 @@ type anthropicDelta struct {
 	StopReason  *string `json:"stop_reason,omitempty"`  // message_delta
 }
 
-// ParseAnthropicSSEChunk parses a single SSE event from an Anthropic streaming response.
+// ParseAnthropicSSEChunk handles the multi-event Anthropic streaming protocol.
 // eventType is the SSE event name (e.g. "message_start", "content_block_delta").
 // data is the JSON payload. Returns a zero ParsedResponse for unrecognized events.
 //
@@ -501,9 +500,8 @@ type anthropicError struct {
 	} `json:"error"`
 }
 
-// ParseAnthropicError extracts a short error description from an Anthropic
-// error response. Returns the error type (e.g. "overloaded_error") when
-// available, falling back to message.
+// ParseAnthropicError returns the error type (e.g. "overloaded_error"),
+// falling back to message.
 func ParseAnthropicError(body []byte) string {
 	var resp anthropicError
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -525,9 +523,8 @@ type openaiError struct {
 	} `json:"error"`
 }
 
-// ParseOpenAIError extracts a short error description from an OpenAI-format
-// error response. Returns the error type (e.g. "rate_limit_exceeded") when
-// available, falling back to code, then message.
+// ParseOpenAIError returns the error type (e.g. "rate_limit_exceeded"),
+// falling back to code, then message.
 func ParseOpenAIError(body []byte) string {
 	var resp openaiError
 	if err := json.Unmarshal(body, &resp); err != nil {

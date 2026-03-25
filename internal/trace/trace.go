@@ -94,7 +94,8 @@ func StartSessionSpan(ctx context.Context, tp oteltrace.TracerProvider, command 
 	return ctx, span
 }
 
-// EmitSpan creates an OTel span from a Call.
+// EmitSpan maps Call fields to gen_ai.* semantic convention attributes.
+// LLM calls get richer spans (model, tokens, tools); HTTP calls get basic metadata.
 func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Call) {
 	tracer := tp.Tracer("aitrace")
 
@@ -125,6 +126,9 @@ func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Cal
 	if call.Kind != capture.KindLLM {
 		if call.Path != "" {
 			attrs = append(attrs, attribute.String("url.path", call.Path))
+		}
+		if call.ErrorMessage != "" {
+			attrs = append(attrs, attribute.String("aitrace.error.message", call.ErrorMessage))
 		}
 	}
 
@@ -199,6 +203,9 @@ func EmitSpan(ctx context.Context, tp oteltrace.TracerProvider, call capture.Cal
 			desc = statusStr + " " + call.ErrorMessage
 		}
 		span.SetStatus(codes.Error, desc)
+	} else if call.StatusCode == 0 && call.ErrorMessage != "" {
+		// Connection error: no HTTP response received.
+		span.SetStatus(codes.Error, call.ErrorMessage)
 	}
 
 	span.End(oteltrace.WithTimestamp(endTime))
@@ -231,6 +238,8 @@ func httpCallSpanName(call capture.Call) string {
 func CallOutcome(call capture.Call) string {
 	if call.Kind == capture.KindLLM {
 		switch {
+		case call.StatusCode == 0 && call.ErrorMessage != "":
+			return call.ErrorMessage
 		case call.StatusCode >= 400:
 			outcome := strconv.Itoa(call.StatusCode)
 			if call.ErrorMessage != "" {
@@ -243,6 +252,9 @@ func CallOutcome(call capture.Call) string {
 			return call.FinishReason
 		}
 		return ""
+	}
+	if call.StatusCode == 0 && call.ErrorMessage != "" {
+		return call.ErrorMessage
 	}
 	if call.StatusCode > 0 {
 		return strconv.Itoa(call.StatusCode)

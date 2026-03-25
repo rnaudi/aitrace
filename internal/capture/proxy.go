@@ -270,8 +270,6 @@ func (p *Proxy) Calls() []Call {
 	return out
 }
 
-// --- proxy.Addon interface ---
-
 // Ensure Proxy implements proxy.Addon at compile time.
 var _ proxy.Addon = (*Proxy)(nil)
 
@@ -410,11 +408,101 @@ func (p *Proxy) SSEEnd(f *proxy.Flow) {
 	p.recordCall(call)
 }
 
-// TODO: emit a Call with error info so failed upstream connections
-// appear in the trace instead of silently disappearing. Currently the child
-// gets an error response but aitrace shows nothing.
-func (p *Proxy) RequestError(f *proxy.Flow, err error)     {}
-func (p *Proxy) HTTPConnectError(f *proxy.Flow, err error) {}
+// RequestError fires when an HTTP request fails after the CONNECT tunnel
+// is established (dial error, TLS failure, response body read error, etc.).
+// We emit a Call so the failure appears in the trace instead of silently
+// disappearing.
+func (p *Proxy) RequestError(f *proxy.Flow, err error) {
+	p.hookWg.Add(1)
+	defer p.hookWg.Done()
+	defer recoverHook("RequestError")
+
+	host := stripPort(f.Request.URL.Host)
+	kind := p.callKind(host)
+
+	endTime := time.Now()
+	call := Call{
+		Kind:         kind,
+		Method:       f.Request.Method,
+		Host:         host,
+		Path:         f.Request.URL.Path,
+		Duration:     endTime.Sub(f.StartTime),
+		StartTime:    f.StartTime,
+		EndTime:      endTime,
+		Sequence:     int(p.callSeq.Add(1)),
+		ErrorMessage: shortError(err),
+	}
+
+	// f.Response is non-nil when the response headers arrived but the body
+	// read failed. Use the status code when available.
+	if f.Response != nil {
+		call.StatusCode = f.Response.StatusCode
+	}
+
+	if kind == KindLLM {
+		call.Provider = InferProvider(host)
+		if f.Request.Body != nil {
+			call.RequestModel = ParseRequestModel(f.Request.Body)
+		}
+	}
+
+	p.recordCall(call)
+}
+
+// HTTPConnectError fires when the HTTPS CONNECT tunnel setup fails
+// (DNS resolution, TLS handshake, connection refused, etc.). We emit a
+// Call so the failure appears in the trace.
+func (p *Proxy) HTTPConnectError(f *proxy.Flow, err error) {
+	p.hookWg.Add(1)
+	defer p.hookWg.Done()
+	defer recoverHook("HTTPConnectError")
+
+	// CONNECT requests use "host:port" as the URL path. The host may
+	// already include a port, which stripPort handles.
+	host := stripPort(f.Request.URL.Host)
+	if host == "" {
+		// Fallback: some CONNECT flows put the host in the URL path.
+		host = stripPort(f.Request.URL.Path)
+	}
+	kind := p.callKind(host)
+
+	endTime := time.Now()
+	call := Call{
+		Kind:         kind,
+		Method:       f.Request.Method,
+		Host:         host,
+		Path:         "",
+		Duration:     endTime.Sub(f.StartTime),
+		StartTime:    f.StartTime,
+		EndTime:      endTime,
+		Sequence:     int(p.callSeq.Add(1)),
+		ErrorMessage: shortError(err),
+	}
+
+	if kind == KindLLM {
+		call.Provider = InferProvider(host)
+	}
+
+	p.recordCall(call)
+}
+
+// shortError extracts a concise description from an error, stripping
+// verbose Go wrappers (e.g. "dial tcp: lookup foo.com: no such host"
+// → "no such host").
+func shortError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+
+	// Go net errors often wrap the root cause after the last colon.
+	// "dial tcp 1.2.3.4:443: connection refused" → "connection refused"
+	// "dial tcp: lookup foo.com: no such host" → "no such host"
+	if i := strings.LastIndex(msg, ": "); i >= 0 {
+		return strings.TrimSpace(msg[i+2:])
+	}
+	return msg
+}
 
 func (p *Proxy) Response(f *proxy.Flow) {
 	p.hookWg.Add(1)
