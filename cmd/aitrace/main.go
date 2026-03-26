@@ -177,7 +177,7 @@ func runTerminal(cmd string, args []string, jsonOutput bool, envs []envtags.Env)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	pemPath, err := cert.WriteCombinedPEM(&caCert, tmpDir)
+	pemPath, err := cert.WriteCombinedPEM(tmpDir, &caCert)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] write combined PEM: %v\n", err)
 		return 1
@@ -293,7 +293,7 @@ func runOTel(cmd string, args []string, jsonOutput bool, envs []envtags.Env) int
 	}
 	defer os.RemoveAll(tmpDir)
 
-	pemPath, err := cert.WriteCombinedPEM(&caCert, tmpDir)
+	pemPath, err := cert.WriteCombinedPEM(tmpDir, &caCert)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[aitrace] write combined PEM: %v\n", err)
 		return 1

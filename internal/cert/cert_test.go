@@ -50,7 +50,7 @@ func TestWriteCombinedPEMContainsEphemeralCA(t *testing.T) {
 	ca := generateTestCA(t)
 	dir := t.TempDir()
 
-	pemPath, err := WriteCombinedPEM(ca, dir)
+	pemPath, err := WriteCombinedPEM(dir, ca)
 	if err != nil {
 		t.Fatalf("WriteCombinedPEM: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestWriteCombinedPEMContainsSystemCAs(t *testing.T) {
 	ca := generateTestCA(t)
 	dir := t.TempDir()
 
-	pemPath, err := WriteCombinedPEM(ca, dir)
+	pemPath, err := WriteCombinedPEM(dir, ca)
 	if err != nil {
 		t.Fatalf("WriteCombinedPEM: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestWriteCombinedPEMMultiplePEMBlocks(t *testing.T) {
 	ca := generateTestCA(t)
 	dir := t.TempDir()
 
-	pemPath, err := WriteCombinedPEM(ca, dir)
+	pemPath, err := WriteCombinedPEM(dir, ca)
 	if err != nil {
 		t.Fatalf("WriteCombinedPEM: %v", err)
 	}

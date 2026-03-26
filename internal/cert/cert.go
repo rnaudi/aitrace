@@ -54,7 +54,7 @@ func FindSystemCertBundle() (string, error) {
 // WriteCombinedPEM writes a PEM file that contains the system CAs plus
 // the proxy's ephemeral CA. Returns the path to the combined file.
 // The caller is responsible for cleaning up dir when done.
-func WriteCombinedPEM(caCert *x509.Certificate, dir string) (string, error) {
+func WriteCombinedPEM(dir string, caCert *x509.Certificate) (string, error) {
 	sysBundlePath, err := FindSystemCertBundle()
 	if err != nil {
 		return "", fmt.Errorf("find system certs: %w", err)
